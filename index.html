@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#7c3aed">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GymApp">
+<title>GymApp</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- HEADER -->
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="4" y="20" width="6" height="8" rx="2" fill="url(#g1)"/>
+        <rect x="10" y="16" width="5" height="16" rx="2" fill="url(#g1)"/>
+        <rect x="33" y="16" width="5" height="16" rx="2" fill="url(#g1)"/>
+        <rect x="38" y="20" width="6" height="8" rx="2" fill="url(#g1)"/>
+        <rect x="15" y="22" width="18" height="4" rx="2" fill="url(#g1)"/>
+        <defs>
+          <linearGradient id="g1" x1="4" y1="16" x2="44" y2="32" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#8b5cf6"/>
+            <stop offset="1" stop-color="#06b6d4"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <span class="brand-name">GymApp</span>
+    </div>
+    <button class="icon-btn" id="offlineBadge" title="Status">
+      <span class="dot online" id="statusDot"></span>
+    </button>
+  </header>
+
+  <!-- VIEWS -->
+  <main class="views">
+
+    <!-- HOME VIEW -->
+    <section class="view active" id="view-home">
+
+      <div class="today-strip">
+        <div>
+          <div class="today-label" id="todayLabel">Hoje</div>
+          <div class="today-date" id="todayDate">--</div>
+        </div>
+        <button class="btn-check" id="btnCheckToday">
+          <span class="check-icon">✓</span>
+          <span id="checkTodayLabel">Marcar treino de hoje</span>
+        </button>
+      </div>
+
+      <div class="day-tabs" id="dayTabs"></div>
+
+      <div class="day-panel" id="dayPanel">
+        <div class="day-panel-head">
+          <input type="text" id="dayNameInput" class="day-name-input" placeholder="Nome do treino (opcional)" maxlength="30">
+        </div>
+
+        <div class="exercise-list" id="exerciseList"></div>
+
+        <button class="btn-add-exercise" id="btnAddExercise">
+          <span class="plus">+</span> Adicionar exercício
+        </button>
+
+        <div class="rest-timer" id="restTimer">
+          <div class="rest-ring-wrap">
+            <svg class="rest-ring" viewBox="0 0 120 120">
+              <circle class="ring-bg" cx="60" cy="60" r="52"></circle>
+              <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="52"></circle>
+            </svg>
+            <div class="rest-time" id="restTime">01:30</div>
+          </div>
+          <div class="rest-controls">
+            <button class="btn-rest" id="btnRestToggle">
+              <span id="btnRestToggleLabel">Descanso</span>
+            </button>
+            <button class="btn-reset" id="btnRestReset" title="Resetar">↺</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROFILE VIEW -->
+    <section class="view" id="view-profile">
+      <div class="profile-card">
+        <div class="avatar">
+          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4" y="20" width="6" height="8" rx="2" fill="url(#g2)"/>
+            <rect x="10" y="16" width="5" height="16" rx="2" fill="url(#g2)"/>
+            <rect x="33" y="16" width="5" height="16" rx="2" fill="url(#g2)"/>
+            <rect x="38" y="20" width="6" height="8" rx="2" fill="url(#g2)"/>
+            <rect x="15" y="22" width="18" height="4" rx="2" fill="url(#g2)"/>
+            <defs>
+              <linearGradient id="g2" x1="4" y1="16" x2="44" y2="32" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#8b5cf6"/><stop offset="1" stop-color="#06b6d4"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <input type="text" id="profileName" class="profile-name-input" placeholder="Seu nome" maxlength="24">
+
+        <div class="profile-fields">
+          <label class="field">
+            <span>Peso (kg)</span>
+            <input type="number" id="profileWeight" step="0.1" min="0" inputmode="decimal">
+          </label>
+          <label class="field">
+            <span>Altura (cm)</span>
+            <input type="number" id="profileHeight" step="1" min="0" inputmode="numeric">
+          </label>
+        </div>
+
+        <div class="weight-trend" id="weightTrend">
+          <span class="trend-icon" id="trendIcon">–</span>
+          <span id="trendText">Sem histórico ainda</span>
+        </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-value" id="statMonth">0</div>
+          <div class="stat-label">Treinos no mês</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statYear">0</div>
+          <div class="stat-label">Treinos no ano</div>
+        </div>
+      </div>
+
+      <div class="calendar-card">
+        <div class="calendar-head">
+          <button class="cal-nav" id="calPrev">‹</button>
+          <div class="cal-month" id="calMonthLabel">-</div>
+          <button class="cal-nav" id="calNext">›</button>
+        </div>
+        <div class="calendar-weekdays">
+          <span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span>
+        </div>
+        <div class="calendar-grid" id="calendarGrid"></div>
+      </div>
+
+      <div class="settings-card">
+        <div class="settings-row">
+          <span>Modo escuro</span>
+          <label class="switch">
+            <input type="checkbox" id="darkModeToggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="app-footer">GymApp · funciona 100% offline</div>
+    </section>
+
+  </main>
+
+  <!-- BOTTOM NAV -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-view="home">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M3 11L12 4l9 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1v-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Treino</span>
+    </button>
+    <button class="nav-btn" data-view="profile">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Perfil</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ADD EXERCISE MODAL -->
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal">
+    <h3>Novo exercício</h3>
+    <label class="field">
+      <span>Nome do exercício</span>
+      <input type="text" id="exNameInput" placeholder="Ex: Supino reto" maxlength="40">
+    </label>
+    <label class="field">
+      <span>Quantidade de séries</span>
+      <input type="number" id="exSetsInput" min="1" max="12" value="3" inputmode="numeric">
+    </label>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="modalCancel">Cancelar</button>
+      <button class="btn-primary" id="modalSave">Adicionar</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
