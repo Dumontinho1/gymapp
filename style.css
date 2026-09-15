@@ -126,13 +126,19 @@ body{
   background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
   padding:16px; box-shadow:var(--shadow);
 }
-.day-panel-head{margin-bottom:10px;}
+.day-panel-head{margin-bottom:10px; display:flex; align-items:center; gap:8px;}
 .day-name-input{
-  width:100%; background:transparent; border:none; color:var(--text);
+  flex:1; min-width:0; background:transparent; border:none; color:var(--text);
   font-size:17px; font-weight:700; padding:6px 4px; border-bottom:1px dashed var(--border);
 }
 .day-name-input:focus{outline:none; border-color: var(--accent);}
 .day-name-input::placeholder{color:var(--text-dim); font-weight:600;}
+.btn-copy-day{
+  flex:none; background:var(--card-2); border:1px solid var(--border); color:var(--text-dim);
+  font-size:12px; font-weight:600; padding:8px 10px; border-radius:10px; cursor:pointer;
+  transition: all .2s;
+}
+.btn-copy-day:hover{ color:var(--accent-2); border-color:var(--accent-2); }
 
 .exercise-list{display:flex; flex-direction:column; gap:10px; margin:10px 0;}
 .empty-state{
@@ -143,9 +149,26 @@ body{
   background:var(--card-2); border:1px solid var(--border); border-radius:14px; padding:12px 14px;
   animation: fadeUp .3s ease;
 }
-.exercise-card-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;}
-.exercise-card-head .exname{font-weight:700; font-size:14.5px;}
-.exercise-actions{display:flex; gap:6px;}
+.exercise-card-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:8px;}
+.exercise-card-head .exname-wrap{display:flex; align-items:center; gap:6px; min-width:0; flex:1;}
+.exercise-card-head .exname{font-weight:700; font-size:14.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.exercise-actions{display:flex; gap:6px; flex:none;}
+.drag-handle{
+  flex:none; background:none; border:none; color:var(--text-dim); cursor:grab;
+  font-size:16px; padding:4px 2px; touch-action:none; user-select:none; line-height:1;
+}
+.exercise-card.dragging{
+  box-shadow:0 14px 30px rgba(0,0,0,.35); border-color:var(--accent-2);
+  cursor:grabbing; position:relative; z-index:5;
+}
+.exercise-card.dragging .drag-handle{cursor:grabbing;}
+
+.last-time{
+  font-size:11.5px; color:var(--text-dim); margin:-2px 0 10px; padding-left:2px;
+  overflow-x:auto; white-space:nowrap; scrollbar-width:none;
+}
+.last-time::-webkit-scrollbar{display:none;}
+.last-time .lt-label{color:var(--accent-2); font-weight:700; margin-right:4px;}
 .icon-mini{
   background:transparent; border:none; color:var(--text-dim); cursor:pointer;
   width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center;
@@ -171,6 +194,22 @@ body{
 .add-set-btn{
   align-self:flex-start; margin-top:6px; background:none; border:1px dashed var(--border);
   color:var(--accent-2); font-size:12px; font-weight:600; padding:5px 10px; border-radius:8px; cursor:pointer;
+}
+
+.exercise-rest-row{
+  display:flex; align-items:center; gap:8px; margin-top:12px; padding-top:10px;
+  border-top:1px solid var(--border);
+}
+.exercise-rest-row .rest-label{font-size:11.5px; color:var(--text-dim); font-weight:600; flex:none;}
+.exercise-rest-row .rest-secs-input{
+  width:52px; background:var(--card); border:1px solid var(--border); border-radius:8px;
+  color:var(--text); padding:6px; font-size:12.5px; text-align:center;
+}
+.exercise-rest-row .rest-secs-input:focus{outline:none; border-color:var(--accent);}
+.exercise-rest-row .unit{font-size:11px; color:var(--text-dim); flex:none;}
+.btn-start-ex-rest{
+  margin-left:auto; flex:none; background:var(--accent-grad); color:#fff; border:none;
+  border-radius:9px; padding:6px 12px; font-size:12px; font-weight:700; cursor:pointer;
 }
 
 .btn-add-exercise{
@@ -202,7 +241,18 @@ body{
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
   font-weight:800; font-size:16px; font-variant-numeric: tabular-nums;
 }
-.rest-controls{display:flex; flex-direction:column; gap:8px; flex:1;}
+.rest-controls{display:flex; flex-direction:column; gap:8px; flex:1; min-width:0;}
+.rest-active-label{
+  font-size:12px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.rest-chips{display:flex; gap:6px; flex-wrap:wrap;}
+.rest-chip{
+  background:var(--card-2); border:1px solid var(--border); color:var(--text-dim);
+  font-size:11px; font-weight:700; padding:5px 9px; border-radius:999px; cursor:pointer; transition: all .2s;
+}
+.rest-chip.active{ background:var(--accent-grad); color:#fff; border-color:transparent; }
+.rest-buttons{display:flex; gap:8px;}
+.rest-buttons .btn-rest{flex:1;}
 .btn-rest{
   background:var(--accent-grad); color:#fff; border:none; border-radius:12px;
   padding:12px; font-weight:700; font-size:14px; cursor:pointer;
@@ -341,7 +391,19 @@ body{
 .modal-backdrop.open .modal{transform:translateY(0);}
 .modal h3{margin:0 0 16px; font-size:18px;}
 .modal .field{margin-bottom:14px;}
+.modal-hint{font-size:12.5px; color:var(--text-dim); margin:-6px 0 14px;}
 .modal-actions{display:flex; gap:10px; margin-top:6px;}
+
+.copy-day-list{display:flex; flex-direction:column; gap:8px; margin-bottom:6px;}
+.copy-day-btn{
+  display:flex; align-items:center; justify-content:space-between;
+  background:var(--card-2); border:1px solid var(--border); color:var(--text);
+  border-radius:12px; padding:12px 14px; font-size:14px; font-weight:600; cursor:pointer;
+  transition: all .2s;
+}
+.copy-day-btn:hover{ border-color:var(--accent-2); }
+.copy-day-btn .cd-meta{font-size:11.5px; color:var(--text-dim); font-weight:600;}
+.copy-day-btn.disabled{ opacity:.4; pointer-events:none; }
 .btn-secondary, .btn-primary{
   flex:1; padding:13px; border-radius:12px; border:none; font-weight:700; font-size:14px; cursor:pointer;
 }
