@@ -412,7 +412,12 @@ input, select, textarea, button{ max-width:100%; }
   background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
   padding:6px 16px; box-shadow:var(--shadow); margin-bottom:18px;
 }
-.settings-row{display:flex; align-items:center; justify-content:space-between; padding:12px 0; font-size:14.5px; font-weight:600;}
+.settings-row{display:flex; align-items:center; justify-content:space-between; padding:12px 0; font-size:14.5px; font-weight:600; gap:12px;}
+.btn-io{
+  flex:none; background:var(--card-2); border:1px solid var(--border); color:var(--text);
+  font-size:12.5px; font-weight:700; padding:8px 14px; border-radius:10px; cursor:pointer; transition: all .2s;
+}
+.btn-io:hover{ border-color:var(--accent-2); color:var(--accent-2); }
 .switch{position:relative; width:46px; height:26px; flex:none;}
 .switch input{opacity:0; width:0; height:0;}
 .slider{
