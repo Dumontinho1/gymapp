@@ -62,6 +62,7 @@
       <div class="day-panel" id="dayPanel">
         <div class="day-panel-head">
           <input type="text" id="dayNameInput" class="day-name-input" placeholder="Nome do treino (opcional)" maxlength="30">
+          <button class="btn-copy-day" id="btnCopyDay" title="Copiar este treino para outro dia">⧉ Copiar</button>
         </div>
 
         <div class="exercise-list" id="exerciseList"></div>
@@ -79,10 +80,19 @@
             <div class="rest-time" id="restTime">01:30</div>
           </div>
           <div class="rest-controls">
-            <button class="btn-rest" id="btnRestToggle">
-              <span id="btnRestToggleLabel">Descanso</span>
-            </button>
-            <button class="btn-reset" id="btnRestReset" title="Resetar">↺</button>
+            <div class="rest-active-label" id="restActiveLabel">Descanso geral</div>
+            <div class="rest-chips" id="restChips">
+              <button class="rest-chip" data-secs="60">60s</button>
+              <button class="rest-chip" data-secs="90">90s</button>
+              <button class="rest-chip" data-secs="120">2min</button>
+              <button class="rest-chip" data-secs="180">3min</button>
+            </div>
+            <div class="rest-buttons">
+              <button class="btn-rest" id="btnRestToggle">
+                <span id="btnRestToggleLabel">Descanso</span>
+              </button>
+              <button class="btn-reset" id="btnRestReset" title="Resetar">↺</button>
+            </div>
           </div>
         </div>
       </div>
@@ -190,6 +200,18 @@
     <div class="modal-actions">
       <button class="btn-secondary" id="modalCancel">Cancelar</button>
       <button class="btn-primary" id="modalSave">Adicionar</button>
+    </div>
+  </div>
+</div>
+
+<!-- COPY WORKOUT MODAL -->
+<div class="modal-backdrop" id="copyModalBackdrop">
+  <div class="modal">
+    <h3>Copiar treino para...</h3>
+    <p class="modal-hint" id="copyModalHint">Escolha o dia de destino. O treino atual será duplicado para lá.</p>
+    <div class="copy-day-list" id="copyDayList"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="copyModalCancel">Cancelar</button>
     </div>
   </div>
 </div>
