@@ -1,4 +1,6 @@
-const CACHE = 'gymapp-cache-v1';
+/* Bump CACHE every time you deploy a change — changing this file's bytes is what
+   makes the browser notice there's an update at all (identical sw.js = no update check). */
+const CACHE = 'gymapp-cache-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -22,18 +24,17 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+/* Network-first: always try to fetch the latest version when online (so updates
+   show up immediately), and only fall back to the cached copy when offline. */
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-          return res;
-        })
-        .catch(() => caches.match('./index.html'));
-    })
+    fetch(event.request)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        return res;
+      })
+      .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
   );
 });
