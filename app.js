@@ -254,6 +254,24 @@
     ringWrap.classList.toggle('pulse', restRemaining <= 10 && restRemaining > 0 && restRunning);
   }
 
+  /* Wake Lock: keep the screen on while resting so the countdown stays visible */
+  var wakeLock = null;
+  async function acquireWakeLock(){
+    if(!('wakeLock' in navigator)) return;
+    try{
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', function(){ wakeLock = null; });
+    }catch(e){ wakeLock = null; }
+  }
+  function releaseWakeLock(){
+    if(wakeLock){ wakeLock.release().catch(function(){}); wakeLock = null; }
+  }
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible' && restRunning && !wakeLock){
+      acquireWakeLock();
+    }
+  });
+
   function beep(){
     try{
       var ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -280,6 +298,7 @@
       restRemaining = 0;
       stopRestInterval();
       restRunning = false;
+      releaseWakeLock();
       beep();
     }
     renderRestTimer();
@@ -295,6 +314,7 @@
     stopRestInterval();
     restRemaining = REST_TOTAL;
     restRunning = false;
+    releaseWakeLock();
     renderRestTimer();
     if(autoStart){ toggleRest(); }
   }
@@ -302,10 +322,12 @@
     if(restRunning){
       restRunning = false;
       stopRestInterval();
+      releaseWakeLock();
     } else {
       if(restRemaining <= 0) restRemaining = REST_TOTAL;
       restRunning = true;
       startRestInterval();
+      acquireWakeLock();
     }
     renderRestTimer();
   }
