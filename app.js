@@ -1100,6 +1100,86 @@
     applyTheme();
   });
 
+  /* ---------- IMPORT / EXPORT WORKOUTS (JSON) ---------- */
+  document.getElementById('btnExportWorkouts').addEventListener('click', function(){
+    var payload = { app: 'GymApp', type: 'workouts', version: 1, exportedAt: todayKey(), workouts: workouts };
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'gymapp-ficha-' + todayKey() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+    showToast('Ficha exportada');
+  });
+
+  document.getElementById('btnImportWorkouts').addEventListener('click', function(){
+    document.getElementById('importFileInput').click();
+  });
+
+  document.getElementById('importFileInput').addEventListener('change', function(e){
+    var file = e.target.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = async function(){
+      var data;
+      try{ data = JSON.parse(reader.result); }
+      catch(err){ showToast('Arquivo inválido'); e.target.value = ''; return; }
+
+      var imported = data && data.workouts ? data.workouts : data;
+      if(!imported || typeof imported !== 'object'){
+        showToast('Arquivo não reconhecido');
+        e.target.value = '';
+        return;
+      }
+
+      var dayKeys = Object.keys(imported).filter(function(k){ return DAYS.some(function(d){ return String(d.idx) === k; }); });
+      if(dayKeys.length === 0){
+        showToast('Nenhum dia válido encontrado no arquivo');
+        e.target.value = '';
+        return;
+      }
+      var dayNames = dayKeys.map(function(k){ return WEEKDAY_FULL[parseInt(k,10)]; }).join(', ');
+
+      var ok = await askConfirm(
+        'Importar ficha',
+        'Isso vai substituir o treino de: ' + dayNames + '. Os outros dias não são afetados. Continuar?',
+        'Importar'
+      );
+      if(!ok){ e.target.value = ''; return; }
+
+      var previousSnapshot = {};
+      dayKeys.forEach(function(k){
+        previousSnapshot[k] = workouts[k];
+        var importedDay = imported[k];
+        importedDay.exercises = (importedDay.exercises || []).map(function(ex){
+          return {
+            id: ex.id || uid(),
+            name: ex.name || 'Exercício',
+            restSeconds: ex.restSeconds || DEFAULT_REST,
+            sets: (ex.sets || []).map(function(s){ return { reps: s.reps || '', load: s.load || '' }; })
+          };
+        });
+        workouts[k] = { name: importedDay.name || '', exercises: importedDay.exercises };
+      });
+      persistWorkouts();
+      renderDayTabs();
+      renderDayPanel();
+      showUndoToast('Ficha importada (' + dayNames + ')', function(){
+        dayKeys.forEach(function(k){
+          if(previousSnapshot[k]) workouts[k] = previousSnapshot[k]; else delete workouts[k];
+        });
+        persistWorkouts();
+        renderDayTabs();
+        renderDayPanel();
+      });
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  });
+
   /* ---------- NAV BUTTONS ---------- */
   document.querySelectorAll('.nav-btn').forEach(function(btn){
     btn.addEventListener('click', function(){ switchView(btn.dataset.view); });
