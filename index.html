@@ -35,9 +35,15 @@
       </svg>
       <span class="brand-name">GymApp</span>
     </div>
-    <button class="icon-btn" id="offlineBadge" title="Status">
-      <span class="dot online" id="statusDot"></span>
-    </button>
+    <div class="topbar-right">
+      <span class="autosave-badge" id="autosaveBadge">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Salvo
+      </span>
+      <button class="icon-btn" id="offlineBadge" title="Status">
+        <span class="dot online" id="statusDot"></span>
+      </button>
+    </div>
   </header>
 
   <!-- VIEWS -->
@@ -64,6 +70,8 @@
           <input type="text" id="dayNameInput" class="day-name-input" placeholder="Nome do treino (opcional)" maxlength="30">
           <button class="btn-copy-day" id="btnCopyDay" title="Copiar este treino para outro dia">⧉ Copiar</button>
         </div>
+
+        <button class="btn-live-start" id="btnLiveStart">▶ Iniciar treino ao vivo</button>
 
         <div class="exercise-list" id="exerciseList"></div>
 
@@ -132,6 +140,11 @@
           <span class="trend-icon" id="trendIcon">–</span>
           <span id="trendText">Sem histórico ainda</span>
         </div>
+
+        <div class="bmi-badge" id="bmiBadge" hidden>
+          <span class="bmi-value" id="bmiValue">–</span>
+          <span class="bmi-label" id="bmiLabel">IMC</span>
+        </div>
       </div>
 
       <div class="stats-row">
@@ -170,7 +183,51 @@
       <div class="app-footer">GymApp · funciona 100% offline</div>
     </section>
 
+    <!-- PROGRESS VIEW -->
+    <section class="view" id="view-progress">
+
+      <div class="compare-card">
+        <div class="compare-col">
+          <div class="compare-label">Este mês</div>
+          <div class="compare-value" id="volThisMonth">0 kg</div>
+        </div>
+        <div class="compare-delta" id="volDelta">–</div>
+        <div class="compare-col">
+          <div class="compare-label">Mês passado</div>
+          <div class="compare-value dim" id="volLastMonth">0 kg</div>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-head">Volume por semana</div>
+        <div class="week-bars" id="weekBars"></div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-head-row">
+          <div class="panel-head">Evolução de carga</div>
+          <select class="exercise-picker" id="exercisePicker"></select>
+        </div>
+        <div class="chart-wrap" id="loadChartWrap">
+          <div class="empty-state" id="loadChartEmpty">Registre cargas em pelo menos 2 treinos concluídos para ver a evolução aqui.</div>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-head">🏆 Ranking de recordes</div>
+        <div class="pr-rank-list" id="prRankList"></div>
+      </div>
+
+      <div class="app-footer">GymApp · funciona 100% offline</div>
+    </section>
+
   </main>
+
+  <!-- TOAST (info / PR celebration / undo) -->
+  <div class="toast" id="toast">
+    <span class="toast-msg" id="toastMsg"></span>
+    <button class="toast-undo" id="toastUndoBtn" hidden>Desfazer</button>
+  </div>
 
   <!-- BOTTOM NAV -->
   <nav class="bottom-nav">
@@ -178,11 +235,90 @@
       <svg viewBox="0 0 24 24" fill="none"><path d="M3 11L12 4l9 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1v-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>Treino</span>
     </button>
+    <button class="nav-btn" data-view="progress">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V10M10 19V5M16 19v-7M20 19V8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Progresso</span>
+    </button>
     <button class="nav-btn" data-view="profile">
       <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       <span>Perfil</span>
     </button>
   </nav>
+</div>
+
+<!-- LIVE WORKOUT MODE -->
+<div class="live-overlay" id="liveOverlay">
+
+  <div class="live-screen" id="liveScreenMain">
+    <div class="live-top">
+      <button class="live-close" id="liveClose" title="Encerrar treino ao vivo">✕</button>
+      <div class="live-progress-wrap">
+        <div class="live-step" id="liveStep">Exercício 1 de 1</div>
+        <div class="live-progress-bar"><div class="live-progress-fill" id="liveProgressFill"></div></div>
+      </div>
+      <div class="live-elapsed" id="liveElapsed">00:00</div>
+    </div>
+
+    <div class="live-body" id="liveBody">
+      <div class="live-exname" id="liveExName">Exercício</div>
+      <div class="live-pr" id="liveExPR" hidden></div>
+      <div class="live-last" id="liveExLast" hidden></div>
+
+      <div class="live-set-card">
+        <div class="live-set-label" id="liveSetLabel">Série 1</div>
+        <div class="live-set-fields">
+          <label class="live-field">
+            <span>Repetições</span>
+            <input type="number" inputmode="numeric" min="0" id="liveRepsInput">
+          </label>
+          <label class="live-field">
+            <span>Carga (kg)</span>
+            <input type="number" inputmode="decimal" min="0" step="0.5" id="liveLoadInput">
+          </label>
+        </div>
+        <button class="btn-live-complete" id="liveCompleteSet">✓ Concluir série</button>
+      </div>
+
+      <div class="live-nav-row">
+        <button class="live-nav-btn" id="livePrevEx">‹ Exercício anterior</button>
+        <button class="live-nav-btn" id="liveNextEx">Próximo exercício ›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rest banner shown between sets -->
+  <div class="live-rest-banner" id="liveRestBanner">
+    <div class="rest-ring-wrap">
+      <svg class="rest-ring" viewBox="0 0 120 120">
+        <circle class="ring-bg" cx="60" cy="60" r="52"></circle>
+        <circle class="ring-fg" id="liveRingFg" cx="60" cy="60" r="52"></circle>
+      </svg>
+      <div class="rest-time" id="liveRestTime">01:30</div>
+    </div>
+    <div class="live-rest-label">Descansando…</div>
+    <button class="btn-skip-rest" id="liveSkipRest">Pular descanso ›</button>
+  </div>
+
+  <!-- Summary shown at the end -->
+  <div class="live-summary" id="liveSummary">
+    <div class="live-summary-trophy">🏁</div>
+    <h2>Treino concluído!</h2>
+    <div class="live-summary-stats">
+      <div class="live-summary-stat">
+        <div class="lss-value" id="summaryTime">00:00</div>
+        <div class="lss-label">Duração</div>
+      </div>
+      <div class="live-summary-stat">
+        <div class="lss-value" id="summaryVolume">0 kg</div>
+        <div class="lss-label">Volume total</div>
+      </div>
+      <div class="live-summary-stat">
+        <div class="lss-value" id="summaryPRs">0</div>
+        <div class="lss-label">Recordes batidos</div>
+      </div>
+    </div>
+    <button class="btn-primary" id="liveSummaryClose">Concluir e voltar</button>
+  </div>
 </div>
 
 <!-- ADD EXERCISE MODAL -->
@@ -212,6 +348,18 @@
     <div class="copy-day-list" id="copyDayList"></div>
     <div class="modal-actions">
       <button class="btn-secondary" id="copyModalCancel">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- GENERIC CONFIRM MODAL (delete / overwrite actions) -->
+<div class="modal-backdrop" id="confirmModalBackdrop">
+  <div class="modal">
+    <h3 id="confirmModalTitle">Confirmar</h3>
+    <p class="modal-hint" id="confirmModalMsg"></p>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="confirmModalCancel">Cancelar</button>
+      <button class="btn-primary btn-danger-action" id="confirmModalOk">Remover</button>
     </div>
   </div>
 </div>
