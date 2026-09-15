@@ -7,6 +7,9 @@
   var LS_PROFILE = 'gymapp:profile';
   var LS_THEME = 'gymapp:theme';
   var LS_LASTDAY = 'gymapp:lastDay';
+  var LS_HISTORY = 'gymapp:history';
+
+  var DEFAULT_REST = 90;
 
   var DAYS = [
     { idx:1, label:'Seg' }, { idx:2, label:'Ter' }, { idx:3, label:'Qua' },
@@ -39,10 +42,34 @@
   var theme = loadJSON(LS_THEME, 'dark');
   var selectedDay = loadJSON(LS_LASTDAY, new Date().getDay());
   var calViewDate = new Date();
+  var history = loadJSON(LS_HISTORY, {}); // { "supino reto": { date:"2026-09-10", sets:[{reps,load}] } }
 
   function getDayData(idx){
     if(!workouts[idx]) workouts[idx] = { name:'', exercises:[] };
     return workouts[idx];
+  }
+
+  function historyKey(name){ return (name||'').trim().toLowerCase(); }
+
+  function persistHistory(){ saveJSON(LS_HISTORY, history); }
+
+  /* Snapshot today's filled-in sets per exercise name, so next time it's trained
+     the previous performance shows up as a reference. Only exercises with at
+     least one filled set are recorded, and only once per exercise per day. */
+  function snapshotHistoryForDay(dayIdx){
+    var data = getDayData(dayIdx);
+    var k = todayKey();
+    data.exercises.forEach(function(ex){
+      var filledSets = ex.sets.filter(function(s){ return s.reps || s.load; });
+      if(filledSets.length === 0) return;
+      history[historyKey(ex.name)] = { date: k, sets: filledSets.map(function(s){ return { reps: s.reps, load: s.load }; }) };
+    });
+    persistHistory();
+  }
+
+  function formatDateShort(dateKey){
+    var parts = dateKey.split('-');
+    return parts[2] + '/' + parts[1];
   }
 
   /* ---------- THEME ---------- */
@@ -114,17 +141,33 @@
   }
 
   function buildExerciseCard(ex){
+    if(ex.restSeconds == null) ex.restSeconds = DEFAULT_REST;
+
     var card = document.createElement('div');
     card.className = 'exercise-card';
     card.dataset.exId = ex.id;
 
     var head = document.createElement('div');
     head.className = 'exercise-card-head';
-    head.innerHTML = '<div class="exname"></div><div class="exercise-actions">'
+    head.innerHTML = '<div class="exname-wrap">'
+      + '<button class="drag-handle" title="Arrastar para reordenar">⠿</button>'
+      + '<div class="exname"></div></div>'
+      + '<div class="exercise-actions">'
       + '<button class="icon-mini danger" data-act="del-ex" title="Remover exercício">🗑</button>'
       + '</div>';
     head.querySelector('.exname').textContent = ex.name;
     card.appendChild(head);
+
+    var lastEntry = history[historyKey(ex.name)];
+    if(lastEntry && lastEntry.date !== todayKey()){
+      var lastLine = document.createElement('div');
+      lastLine.className = 'last-time';
+      var summary = lastEntry.sets.map(function(s){
+        return (s.reps || '-') + '×' + (s.load || '-') + 'kg';
+      }).join(', ');
+      lastLine.innerHTML = '<span class="lt-label">Última vez (' + formatDateShort(lastEntry.date) + '):</span>' + summary;
+      card.appendChild(lastLine);
+    }
 
     var rows = document.createElement('div');
     rows.className = 'set-rows';
@@ -143,6 +186,24 @@
     });
     card.appendChild(addSetBtn);
 
+    var restRow = document.createElement('div');
+    restRow.className = 'exercise-rest-row';
+    restRow.innerHTML = '<span class="rest-label">Descanso</span>'
+      + '<input type="number" min="10" max="600" step="5" class="rest-secs-input">'
+      + '<span class="unit">s</span>'
+      + '<button class="btn-start-ex-rest">▶ Iniciar</button>';
+    var restSecsInput = restRow.querySelector('.rest-secs-input');
+    restSecsInput.value = ex.restSeconds;
+    restSecsInput.addEventListener('input', function(){
+      var v = parseInt(restSecsInput.value, 10);
+      if(!isNaN(v) && v > 0) ex.restSeconds = v;
+      persistWorkouts();
+    });
+    restRow.querySelector('.btn-start-ex-rest').addEventListener('click', function(){
+      startRestFor(ex.name, ex.restSeconds);
+    });
+    card.appendChild(restRow);
+
     head.querySelector('[data-act="del-ex"]').addEventListener('click', function(){
       var data = getDayData(selectedDay);
       data.exercises = data.exercises.filter(function(e){ return e.id !== ex.id; });
@@ -151,7 +212,69 @@
       renderDayTabs();
     });
 
+    attachDragHandlers(card, head.querySelector('.drag-handle'));
+
     return card;
+  }
+
+  /* ---------- DRAG TO REORDER (Pointer Events, works with mouse + touch) ---------- */
+  function attachDragHandlers(card, handle){
+    handle.addEventListener('pointerdown', function(e){
+      e.preventDefault();
+      var list = card.parentElement;
+      var startY = e.clientY;
+      card.classList.add('dragging');
+      try{ handle.setPointerCapture(e.pointerId); }catch(err){}
+
+      function onMove(ev){
+        var delta = ev.clientY - startY;
+        card.style.transform = 'translateY(' + delta + 'px)';
+
+        var cardRect = card.getBoundingClientRect();
+        var cardCenter = cardRect.top + cardRect.height / 2;
+        var siblings = Array.from(list.children).filter(function(c){
+          return c !== card && c.classList.contains('exercise-card');
+        });
+        for(var i=0;i<siblings.length;i++){
+          var sib = siblings[i];
+          var sibRect = sib.getBoundingClientRect();
+          var sibCenter = sibRect.top + sibRect.height / 2;
+          var pos = card.compareDocumentPosition(sib);
+          var sibIsBeforeCard = !!(pos & Node.DOCUMENT_POSITION_PRECEDING);
+          if(cardCenter < sibCenter && sibIsBeforeCard){
+            list.insertBefore(card, sib);
+            card.style.transform = 'translateY(0)';
+            startY = ev.clientY;
+            break;
+          } else if(cardCenter > sibCenter && !sibIsBeforeCard){
+            list.insertBefore(card, sib.nextSibling);
+            card.style.transform = 'translateY(0)';
+            startY = ev.clientY;
+            break;
+          }
+        }
+      }
+      function onUp(ev){
+        card.classList.remove('dragging');
+        card.style.transform = '';
+        try{ handle.releasePointerCapture(ev.pointerId); }catch(err){}
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        handle.removeEventListener('pointercancel', onUp);
+
+        var newOrderIds = Array.from(list.children)
+          .filter(function(c){ return c.classList.contains('exercise-card'); })
+          .map(function(c){ return c.dataset.exId; });
+        var data = getDayData(selectedDay);
+        data.exercises.sort(function(a, b){
+          return newOrderIds.indexOf(a.id) - newOrderIds.indexOf(b.id);
+        });
+        persistWorkouts();
+      }
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+      handle.addEventListener('pointercancel', onUp);
+    });
   }
 
   function buildSetRow(ex, s, i){
@@ -216,28 +339,80 @@
     persistWorkouts();
   });
 
+  /* ---------- COPY WORKOUT TO ANOTHER DAY ---------- */
+  var copyModalBackdrop = document.getElementById('copyModalBackdrop');
+  function openCopyModal(){
+    var listEl = document.getElementById('copyDayList');
+    listEl.innerHTML = '';
+    DAYS.filter(function(d){ return d.idx !== selectedDay; }).forEach(function(d){
+      var target = getDayData(d.idx);
+      var btn = document.createElement('button');
+      btn.className = 'copy-day-btn';
+      var fullLabel = WEEKDAY_FULL[d.idx];
+      var meta = target.exercises.length
+        ? target.exercises.length + ' exercício(s) — será substituído'
+        : 'vazio';
+      btn.innerHTML = '<span>' + fullLabel + '</span><span class="cd-meta">' + meta + '</span>';
+      btn.addEventListener('click', function(){
+        copyWorkoutTo(d.idx);
+      });
+      listEl.appendChild(btn);
+    });
+    copyModalBackdrop.classList.add('open');
+  }
+  function closeCopyModal(){ copyModalBackdrop.classList.remove('open'); }
+  function copyWorkoutTo(targetIdx){
+    var source = getDayData(selectedDay);
+    workouts[targetIdx] = {
+      name: source.name,
+      exercises: source.exercises.map(function(ex){
+        return {
+          id: uid(),
+          name: ex.name,
+          restSeconds: ex.restSeconds || DEFAULT_REST,
+          sets: ex.sets.map(function(s){ return { reps: s.reps, load: s.load }; })
+        };
+      })
+    };
+    persistWorkouts();
+    closeCopyModal();
+    renderDayTabs();
+    if(targetIdx === selectedDay) renderDayPanel();
+  }
+  document.getElementById('btnCopyDay').addEventListener('click', openCopyModal);
+  document.getElementById('copyModalCancel').addEventListener('click', closeCopyModal);
+  copyModalBackdrop.addEventListener('click', function(e){ if(e.target === copyModalBackdrop) closeCopyModal(); });
+
   /* ---------- TODAY CHECK BUTTON ---------- */
   document.getElementById('btnCheckToday').addEventListener('click', function(){
     var k = todayKey();
-    if(attendance[k]) delete attendance[k];
-    else attendance[k] = true;
+    if(attendance[k]){
+      delete attendance[k];
+    } else {
+      attendance[k] = true;
+      snapshotHistoryForDay(new Date().getDay());
+    }
     saveJSON(LS_ATTEND, attendance);
     renderTodayStrip();
     renderDayTabs();
+    renderDayPanel();
     if(document.getElementById('view-profile').classList.contains('active')) renderProfile();
   });
 
-  /* ---------- REST TIMER ---------- */
-  var REST_TOTAL = 90;
+  /* ---------- REST TIMER (variable duration, per-exercise or general) ---------- */
+  var REST_TOTAL = DEFAULT_REST;
   var restRemaining = REST_TOTAL;
   var restRunning = false;
   var restInterval = null;
+  var restLabel = 'Descanso geral';
   var RING_CIRC = 2 * Math.PI * 52;
 
   var ringFg = document.getElementById('ringFg');
   var restTimeEl = document.getElementById('restTime');
   var restToggleBtn = document.getElementById('btnRestToggle');
   var restToggleLabel = document.getElementById('btnRestToggleLabel');
+  var restActiveLabelEl = document.getElementById('restActiveLabel');
+  var restChipsEl = document.getElementById('restChips');
   var ringWrap = document.querySelector('.rest-ring-wrap');
   ringFg.style.strokeDasharray = RING_CIRC;
 
@@ -252,7 +427,39 @@
     restToggleBtn.classList.toggle('running', restRunning);
     restToggleLabel.textContent = restRunning ? 'Pausar' : (restRemaining < REST_TOTAL && restRemaining > 0 ? 'Continuar' : 'Descanso');
     ringWrap.classList.toggle('pulse', restRemaining <= 10 && restRemaining > 0 && restRunning);
+    restActiveLabelEl.textContent = restLabel;
+    Array.from(restChipsEl.children).forEach(function(chip){
+      chip.classList.toggle('active', parseInt(chip.dataset.secs, 10) === REST_TOTAL);
+    });
   }
+
+  function setRestDuration(secs, label){
+    REST_TOTAL = secs;
+    restLabel = label || ('Descanso geral (' + secs + 's)');
+    restRemaining = secs;
+    restRunning = false;
+    stopRestInterval();
+    releaseWakeLock();
+    renderRestTimer();
+  }
+
+  function startRestFor(exerciseName, secs){
+    REST_TOTAL = secs;
+    restLabel = 'Descanso — ' + exerciseName;
+    restRemaining = secs;
+    restRunning = true;
+    startRestInterval();
+    acquireWakeLock();
+    renderRestTimer();
+    document.getElementById('restTimer').scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }
+
+  Array.from(restChipsEl.children).forEach(function(chip){
+    chip.addEventListener('click', function(){
+      if(restRunning) return;
+      setRestDuration(parseInt(chip.dataset.secs, 10));
+    });
+  });
 
   /* Wake Lock: keep the screen on while resting so the countdown stays visible */
   var wakeLock = null;
