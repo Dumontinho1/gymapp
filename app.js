@@ -11,6 +11,7 @@
   var LS_PR = 'gymapp:prs';
   var LS_SESSIONS = 'gymapp:sessions';
   var LS_PRLOG = 'gymapp:prlog';
+  var LS_NOTIF = 'gymapp:notifPref';
 
   var DEFAULT_REST = 90;
 
@@ -60,6 +61,7 @@
   var prs = loadJSON(LS_PR, {}); // { "supino reto": { load:60, reps:"8", date:"2026-09-10" } }
   var sessions = loadJSON(LS_SESSIONS, []); // [{ date, dayIdx, exercises:[{name, sets:[{reps,load}]}] }]
   var prlog = loadJSON(LS_PRLOG, []); // [{ name, load, date }] — appended each time a PR is broken
+  var notifPref = loadJSON(LS_NOTIF, false);
 
   function getDayData(idx){
     if(!workouts[idx]) workouts[idx] = { name:'', exercises:[] };
@@ -277,13 +279,25 @@
     head.className = 'exercise-card-head';
     head.innerHTML = '<div class="exname-wrap">'
       + '<button class="drag-handle" title="Arrastar para reordenar">⠿</button>'
-      + '<div class="exname"></div>'
+      + '<input type="text" class="exname-input" maxlength="40" title="Toque para renomear">'
       + (prEntry ? '<span class="pr-badge">🏆 ' + prEntry.load + 'kg</span>' : '')
       + '</div>'
       + '<div class="exercise-actions">'
       + '<button class="icon-mini danger" data-act="del-ex" title="Remover exercício">🗑</button>'
       + '</div>';
-    head.querySelector('.exname').textContent = ex.name;
+    var exNameInput = head.querySelector('.exname-input');
+    exNameInput.value = ex.name;
+    exNameInput.addEventListener('input', function(){
+      ex.name = exNameInput.value;
+      persistWorkouts();
+    });
+    exNameInput.addEventListener('change', function(){
+      var parent = card.parentElement;
+      if(!parent) return;
+      var fresh = buildExerciseCard(ex);
+      parent.replaceChild(fresh, card);
+      renderDayTabs();
+    });
     card.appendChild(head);
 
     function handlePRCheck(loadVal, repsVal){
@@ -588,6 +602,9 @@
   var restRemaining = REST_TOTAL;
   var restRunning = false;
   var restInterval = null;
+  var restEndAt = 0; // absolute timestamp (ms) the countdown ends — lets us recompute
+                      // the true remaining time even if setInterval got throttled
+                      // or fully paused while the app was minimized.
   var restLabel = 'Descanso geral';
   var RING_CIRC = 2 * Math.PI * 52;
 
@@ -631,6 +648,7 @@
     REST_TOTAL = secs;
     restLabel = 'Descanso — ' + exerciseName;
     restRemaining = secs;
+    restEndAt = Date.now() + secs*1000;
     restRunning = true;
     startRestInterval();
     acquireWakeLock();
@@ -658,9 +676,12 @@
     if(wakeLock){ wakeLock.release().catch(function(){}); wakeLock = null; }
   }
   document.addEventListener('visibilitychange', function(){
-    if(document.visibilityState === 'visible' && restRunning && !wakeLock){
-      acquireWakeLock();
+    if(document.visibilityState !== 'visible') return;
+    if(restRunning){
+      if(!wakeLock) acquireWakeLock();
+      tickRest(); // snap the display to the true elapsed time right away
     }
+    if(live.restRunning) tickLiveRest();
   });
 
   function beep(){
@@ -683,14 +704,36 @@
     if(navigator.vibrate) navigator.vibrate([200,80,200,80,200]);
   }
 
+  /* Best-effort alert while the app is minimized: shows a silent system
+     notification via the Service Worker so you notice rest is over even if
+     you're on another app. Android Chrome keeps this reliable in the
+     background; iOS Safari's PWA background limits mean it mostly fires once
+     you reopen/foreground the app rather than while deeply minimized. */
+  function notifyRestDone(label){
+    if(!notifPref) return;
+    if(!('Notification' in window) || Notification.permission !== 'granted') return;
+    if(!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.ready.then(function(reg){
+      reg.showNotification('Descanso finalizado', {
+        body: (label || 'Descanso') + ' — hora de voltar pro treino 💪',
+        silent: true,
+        tag: 'gymapp-rest',
+        renotify: true,
+        icon: 'icon.svg'
+      }).catch(function(){});
+    });
+  }
+
   function tickRest(){
-    restRemaining--;
+    if(!restRunning) return;
+    restRemaining = Math.max(0, Math.round((restEndAt - Date.now()) / 1000));
     if(restRemaining <= 0){
       restRemaining = 0;
       stopRestInterval();
       restRunning = false;
       releaseWakeLock();
       beep();
+      notifyRestDone(restLabel);
     }
     renderRestTimer();
   }
@@ -716,6 +759,7 @@
       releaseWakeLock();
     } else {
       if(restRemaining <= 0) restRemaining = REST_TOTAL;
+      restEndAt = Date.now() + restRemaining*1000;
       restRunning = true;
       startRestInterval();
       acquireWakeLock();
@@ -1100,6 +1144,28 @@
     applyTheme();
   });
 
+  var notifToggleEl = document.getElementById('notifToggle');
+  notifToggleEl.checked = notifPref && 'Notification' in window && Notification.permission === 'granted';
+  notifToggleEl.addEventListener('change', async function(e){
+    if(e.target.checked){
+      if(!('Notification' in window)){
+        e.target.checked = false;
+        showToast('Notificações não suportadas neste navegador');
+        return;
+      }
+      var perm = await Notification.requestPermission();
+      if(perm !== 'granted'){
+        e.target.checked = false;
+        showToast('Permissão de notificação negada');
+        notifPref = false;
+        saveJSON(LS_NOTIF, notifPref);
+        return;
+      }
+    }
+    notifPref = e.target.checked;
+    saveJSON(LS_NOTIF, notifPref);
+  });
+
   /* ---------- IMPORT / EXPORT WORKOUTS (JSON) ---------- */
   document.getElementById('btnExportWorkouts').addEventListener('click', function(){
     var payload = { app: 'GymApp', type: 'workouts', version: 1, exportedAt: todayKey(), workouts: workouts };
@@ -1194,7 +1260,7 @@
   var live = {
     exercises: [], exIndex: 0, setIndex: 0, startTime: 0,
     volume: 0, prCount: 0, restInterval: null, restRemaining: 0,
-    restTotal: 0, elapsedInterval: null
+    restTotal: 0, restRunning: false, restEndAt: 0, elapsedInterval: null
   };
 
   var liveOverlay = document.getElementById('liveOverlay');
@@ -1284,26 +1350,34 @@
   function startLiveRest(secs){
     live.restTotal = secs;
     live.restRemaining = secs;
+    live.restEndAt = Date.now() + secs*1000;
+    live.restRunning = true;
     liveRestBanner.classList.add('show');
     document.getElementById('liveRestTime').textContent = formatMMSS(secs);
     updateLiveRingFg();
     acquireWakeLock();
     clearInterval(live.restInterval);
-    live.restInterval = setInterval(function(){
-      live.restRemaining--;
-      if(live.restRemaining <= 0){
-        live.restRemaining = 0;
-        clearInterval(live.restInterval);
-        beep();
-        endLiveRest();
-        return;
-      }
-      document.getElementById('liveRestTime').textContent = formatMMSS(live.restRemaining);
-      updateLiveRingFg();
-    }, 1000);
+    live.restInterval = setInterval(tickLiveRest, 1000);
+  }
+
+  function tickLiveRest(){
+    if(!live.restRunning) return;
+    live.restRemaining = Math.max(0, Math.round((live.restEndAt - Date.now()) / 1000));
+    if(live.restRemaining <= 0){
+      live.restRemaining = 0;
+      clearInterval(live.restInterval);
+      live.restRunning = false;
+      beep();
+      notifyRestDone(currentLiveExercise() ? currentLiveExercise().name : 'Treino ao vivo');
+      endLiveRest();
+      return;
+    }
+    document.getElementById('liveRestTime').textContent = formatMMSS(live.restRemaining);
+    updateLiveRingFg();
   }
 
   function endLiveRest(){
+    live.restRunning = false;
     liveRestBanner.classList.remove('show');
     var ex = currentLiveExercise();
     if(ex && live.setIndex >= ex.sets.length) goNextExercise();
@@ -1311,6 +1385,7 @@
   }
 
   function finishLiveWorkout(){
+    live.restRunning = false;
     clearInterval(live.elapsedInterval);
     clearInterval(live.restInterval);
     liveRestBanner.classList.remove('show');
@@ -1350,11 +1425,13 @@
   });
 
   document.getElementById('liveSkipRest').addEventListener('click', function(){
+    live.restRunning = false;
     clearInterval(live.restInterval);
     endLiveRest();
   });
 
   document.getElementById('liveNextEx').addEventListener('click', function(){
+    live.restRunning = false;
     clearInterval(live.restInterval);
     liveRestBanner.classList.remove('show');
     live.exIndex = Math.min(live.exIndex+1, live.exercises.length-1);
@@ -1362,6 +1439,7 @@
     renderLiveSet();
   });
   document.getElementById('livePrevEx').addEventListener('click', function(){
+    live.restRunning = false;
     clearInterval(live.restInterval);
     liveRestBanner.classList.remove('show');
     live.exIndex = Math.max(live.exIndex-1, 0);
@@ -1376,6 +1454,7 @@
       'Encerrar'
     );
     if(!ok) return;
+    live.restRunning = false;
     clearInterval(live.restInterval);
     clearInterval(live.elapsedInterval);
     liveRestBanner.classList.remove('show');
