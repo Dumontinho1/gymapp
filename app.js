@@ -1521,4 +1521,17 @@
   renderDayPanel();
   renderRestTimer();
 
+  /* Keep the splash on screen for a small minimum time so it never just
+     flickers on a fast load — feels intentional instead of a glitch. */
+  (function hideSplash(){
+    var splash = document.getElementById('splash');
+    if(!splash) return;
+    var elapsed = Date.now() - (window.__gymappLoadStart || Date.now());
+    var minDelay = Math.max(0, 500 - elapsed);
+    setTimeout(function(){
+      splash.classList.add('hide');
+      setTimeout(function(){ splash.remove(); }, 450);
+    }, minDelay);
+  })();
+
 })();
