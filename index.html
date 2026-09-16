@@ -12,8 +12,35 @@
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="icon" href="icon.svg">
 <link rel="stylesheet" href="style.css">
+<script>
+  window.__gymappLoadStart = Date.now();
+  try{
+    var t = localStorage.getItem('gymapp:theme');
+    var theme = t ? JSON.parse(t) : 'dark';
+    document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+  }catch(e){}
+</script>
 </head>
 <body>
+
+<!-- SPLASH / LOADING SCREEN -->
+<div class="splash" id="splash">
+  <svg class="splash-logo" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="gSplash" x1="48" y1="176" x2="464" y2="336" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#8b5cf6"/>
+        <stop offset="1" stop-color="#06b6d4"/>
+      </linearGradient>
+    </defs>
+    <rect x="48" y="216" width="64" height="80" rx="20" fill="url(#gSplash)"/>
+    <rect x="112" y="176" width="52" height="160" rx="20" fill="url(#gSplash)"/>
+    <rect x="348" y="176" width="52" height="160" rx="20" fill="url(#gSplash)"/>
+    <rect x="400" y="216" width="64" height="80" rx="20" fill="url(#gSplash)"/>
+    <rect x="164" y="238" width="184" height="36" rx="18" fill="url(#gSplash)"/>
+  </svg>
+  <div class="splash-name">GymApp</div>
+  <div class="splash-bar"><div class="splash-bar-fill"></div></div>
+</div>
 
 <div class="app" id="app">
 
