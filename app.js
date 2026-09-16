@@ -1527,7 +1527,7 @@
     var splash = document.getElementById('splash');
     if(!splash) return;
     var elapsed = Date.now() - (window.__gymappLoadStart || Date.now());
-    var minDelay = Math.max(0, 1500 - elapsed);
+    var minDelay = Math.max(0, 2500 - elapsed);
     setTimeout(function(){
       splash.classList.add('hide');
       setTimeout(function(){ splash.remove(); }, 450);
