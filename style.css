@@ -166,7 +166,12 @@ input, select, textarea, button{ max-width:100%; }
 }
 .exercise-card-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:8px;}
 .exercise-card-head .exname-wrap{display:flex; align-items:center; gap:6px; min-width:0; flex:1;}
-.exercise-card-head .exname{font-weight:700; font-size:14.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.exercise-card-head .exname-input{
+  flex:1; min-width:0; font-weight:700; font-size:14.5px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; background:transparent; border:none;
+  color:var(--text); padding:2px 0; font-family:inherit;
+}
+.exercise-card-head .exname-input:focus{ outline:none; border-bottom:1px dashed var(--accent); }
 .pr-badge{
   flex:none; display:flex; align-items:center; gap:3px; font-size:10.5px; font-weight:800;
   color:#3a2a06; background:linear-gradient(135deg, var(--gold), var(--gold-2));
@@ -413,6 +418,7 @@ input, select, textarea, button{ max-width:100%; }
   padding:6px 16px; box-shadow:var(--shadow); margin-bottom:18px;
 }
 .settings-row{display:flex; align-items:center; justify-content:space-between; padding:12px 0; font-size:14.5px; font-weight:600; gap:12px;}
+.settings-hint{font-size:11.5px; color:var(--text-dim); font-weight:500; margin:-4px 0 12px; line-height:1.4;}
 .btn-io{
   flex:none; background:var(--card-2); border:1px solid var(--border); color:var(--text);
   font-size:12.5px; font-weight:700; padding:8px 14px; border-radius:10px; cursor:pointer; transition: all .2s;
