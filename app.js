@@ -77,9 +77,9 @@
      least one filled set are recorded, and only once per exercise per day. */
   function persistSessions(){ saveJSON(LS_SESSIONS, sessions); }
 
-  function snapshotHistoryForDay(dayIdx){
+  function snapshotHistoryForDay(dayIdx, dateKey){
     var data = getDayData(dayIdx);
-    var k = todayKey();
+    var k = dateKey || todayKey();
     var sessionExercises = [];
     data.exercises.forEach(function(ex){
       var filledSets = ex.sets.filter(function(s){ return s.reps || s.load; });
@@ -219,10 +219,32 @@
     var now = new Date();
     document.getElementById('todayLabel').textContent = WEEKDAY_FULL[now.getDay()];
     document.getElementById('todayDate').textContent = pad2(now.getDate())+' de '+MONTHS[now.getMonth()]+' de '+now.getFullYear();
-    var done = !!attendance[todayKey()];
+    renderCheckButton();
+  }
+
+  /* The most recent real calendar date that falls on the given weekday (0-6) —
+     "today" if it matches, otherwise the closest day within the last week.
+     Lets marking a day tab as done log the date you actually trained, even
+     when you open the tab a day or two later (e.g. logging Tuesday's session
+     on Wednesday). */
+  function mostRecentDateForWeekday(weekday){
+    var now = new Date();
+    var diff = (now.getDay() - weekday + 7) % 7;
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff);
+  }
+
+  function renderCheckButton(){
+    var targetDate = mostRecentDateForWeekday(selectedDay);
+    var key = todayKey(targetDate);
+    var isRealToday = selectedDay === new Date().getDay();
+    var done = !!attendance[key];
     var btn = document.getElementById('btnCheckToday');
     btn.classList.toggle('done', done);
-    document.getElementById('checkTodayLabel').textContent = done ? 'Treino concluído hoje' : 'Marcar treino de hoje';
+    var dateLabel = pad2(targetDate.getDate()) + '/' + pad2(targetDate.getMonth()+1);
+    var label;
+    if(isRealToday) label = done ? 'Treino concluído hoje' : 'Marcar treino de hoje';
+    else label = (done ? 'Concluído — ' : 'Marcar ') + WEEKDAY_FULL[selectedDay] + ' (' + dateLabel + ')';
+    document.getElementById('checkTodayLabel').textContent = label;
   }
 
   /* ---------- DAY TABS ---------- */
@@ -243,6 +265,7 @@
         saveJSON(LS_LASTDAY, selectedDay);
         renderDayTabs();
         renderDayPanel();
+        renderCheckButton();
       });
       wrap.appendChild(el);
     });
@@ -582,17 +605,18 @@
     if(document.getElementById('view-profile').classList.contains('active')) renderProfile();
   }
   document.getElementById('btnCheckToday').addEventListener('click', function(){
-    var k = todayKey();
+    var targetDate = mostRecentDateForWeekday(selectedDay);
+    var k = todayKey(targetDate);
     if(attendance[k]){
       delete attendance[k];
       refreshAfterAttendanceChange();
-      showUndoToast('Treino de hoje desmarcado', function(){
+      showUndoToast('Treino desmarcado', function(){
         attendance[k] = true;
         refreshAfterAttendanceChange();
       });
     } else {
       attendance[k] = true;
-      snapshotHistoryForDay(new Date().getDay());
+      snapshotHistoryForDay(selectedDay, k);
       refreshAfterAttendanceChange();
     }
   });
@@ -1468,8 +1492,9 @@
   document.getElementById('liveSummaryClose').addEventListener('click', function(){
     liveSummaryEl.classList.remove('show');
     liveOverlay.classList.remove('open');
-    if(!attendance[todayKey()]) attendance[todayKey()] = true;
-    snapshotHistoryForDay(selectedDay);
+    var k = todayKey(mostRecentDateForWeekday(selectedDay));
+    if(!attendance[k]) attendance[k] = true;
+    snapshotHistoryForDay(selectedDay, k);
     refreshAfterAttendanceChange();
   });
 
