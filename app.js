@@ -12,6 +12,7 @@
   var LS_SESSIONS = 'gymapp:sessions';
   var LS_PRLOG = 'gymapp:prlog';
   var LS_NOTIF = 'gymapp:notifPref';
+  var LS_LAST_EXPORT = 'gymapp:lastExport';
 
   var DEFAULT_REST = 90;
 
@@ -1192,17 +1193,22 @@
 
   /* ---------- IMPORT / EXPORT WORKOUTS (JSON) ---------- */
   document.getElementById('btnExportWorkouts').addEventListener('click', function(){
-    var payload = { app: 'GymApp', type: 'workouts', version: 1, exportedAt: todayKey(), workouts: workouts };
+    var payload = {
+      app: 'GymApp', type: 'full-backup', version: 2, exportedAt: todayKey(),
+      workouts: workouts, profile: profile, attendance: attendance,
+      history: history, prs: prs, sessions: sessions, prlog: prlog
+    };
     var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
-    a.download = 'gymapp-ficha-' + todayKey() + '.json';
+    a.download = 'gymapp-backup-' + todayKey() + '.json';
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
-    showToast('Ficha exportada');
+    saveJSON(LS_LAST_EXPORT, todayKey());
+    showToast('Backup exportado');
   });
 
   document.getElementById('btnImportWorkouts').addEventListener('click', function(){
@@ -1218,52 +1224,83 @@
       try{ data = JSON.parse(reader.result); }
       catch(err){ showToast('Arquivo inválido'); e.target.value = ''; return; }
 
-      var imported = data && data.workouts ? data.workouts : data;
-      if(!imported || typeof imported !== 'object'){
+      if(!data || typeof data !== 'object'){
         showToast('Arquivo não reconhecido');
         e.target.value = '';
         return;
       }
 
-      var dayKeys = Object.keys(imported).filter(function(k){ return DAYS.some(function(d){ return String(d.idx) === k; }); });
-      if(dayKeys.length === 0){
-        showToast('Nenhum dia válido encontrado no arquivo');
+      /* Older exports (and the sample ficha files) only carry `workouts` at
+         the top level; full backups carry every store. Restore whichever
+         pieces are present. */
+      var importedWorkouts = data.workouts || (DAYS.some(function(d){ return data[String(d.idx)]; }) ? data : null);
+      var parts = [];
+      var dayKeys = [];
+      if(importedWorkouts){
+        dayKeys = Object.keys(importedWorkouts).filter(function(k){ return DAYS.some(function(d){ return String(d.idx) === k; }); });
+        if(dayKeys.length) parts.push('ficha (' + dayKeys.map(function(k){ return WEEKDAY_FULL[parseInt(k,10)]; }).join(', ') + ')');
+      }
+      if(data.profile) parts.push('perfil (nome/peso/altura)');
+      if(data.attendance) parts.push('calendário de treinos');
+      if(data.history) parts.push('histórico de "última vez"');
+      if(data.prs) parts.push('recordes pessoais');
+      if(data.sessions) parts.push('sessões (progresso)');
+
+      if(parts.length === 0){
+        showToast('Nenhum dado reconhecido no arquivo');
         e.target.value = '';
         return;
       }
-      var dayNames = dayKeys.map(function(k){ return WEEKDAY_FULL[parseInt(k,10)]; }).join(', ');
 
       var ok = await askConfirm(
-        'Importar ficha',
-        'Isso vai substituir o treino de: ' + dayNames + '. Os outros dias não são afetados. Continuar?',
+        'Importar backup',
+        'Isso vai substituir: ' + parts.join('; ') + '. Continuar?',
         'Importar'
       );
       if(!ok){ e.target.value = ''; return; }
 
-      var previousSnapshot = {};
-      dayKeys.forEach(function(k){
-        previousSnapshot[k] = workouts[k];
-        var importedDay = imported[k];
-        importedDay.exercises = (importedDay.exercises || []).map(function(ex){
-          return {
-            id: ex.id || uid(),
-            name: ex.name || 'Exercício',
-            restSeconds: ex.restSeconds || DEFAULT_REST,
-            sets: (ex.sets || []).map(function(s){ return { reps: s.reps || '', load: s.load || '' }; })
-          };
-        });
-        workouts[k] = { name: importedDay.name || '', exercises: importedDay.exercises };
-      });
-      persistWorkouts();
-      renderDayTabs();
-      renderDayPanel();
-      showUndoToast('Ficha importada (' + dayNames + ')', function(){
+      var previous = {
+        workouts: JSON.parse(JSON.stringify(workouts)), profile: JSON.parse(JSON.stringify(profile)),
+        attendance: JSON.parse(JSON.stringify(attendance)), history: JSON.parse(JSON.stringify(history)),
+        prs: JSON.parse(JSON.stringify(prs)), sessions: JSON.parse(JSON.stringify(sessions)), prlog: JSON.parse(JSON.stringify(prlog))
+      };
+
+      if(importedWorkouts && dayKeys.length){
         dayKeys.forEach(function(k){
-          if(previousSnapshot[k]) workouts[k] = previousSnapshot[k]; else delete workouts[k];
+          var importedDay = importedWorkouts[k];
+          var exercises = (importedDay.exercises || []).map(function(ex){
+            return {
+              id: ex.id || uid(),
+              name: ex.name || 'Exercício',
+              restSeconds: ex.restSeconds || DEFAULT_REST,
+              sets: (ex.sets || []).map(function(s){ return { reps: s.reps || '', load: s.load || '' }; })
+            };
+          });
+          workouts[k] = { name: importedDay.name || '', exercises: exercises };
         });
         persistWorkouts();
+      }
+      if(data.profile){ profile = data.profile; saveJSON(LS_PROFILE, profile); }
+      if(data.attendance){ attendance = data.attendance; saveJSON(LS_ATTEND, attendance); }
+      if(data.history){ history = data.history; persistHistory(); }
+      if(data.prs){ prs = data.prs; persistPRs(); }
+      if(data.sessions){ sessions = data.sessions; persistSessions(); }
+      if(data.prlog){ prlog = data.prlog; persistPRLog(); }
+
+      renderDayTabs();
+      renderDayPanel();
+      if(document.getElementById('view-profile').classList.contains('active')) renderProfile();
+      showUndoToast('Backup importado (' + parts.join('; ') + ')', function(){
+        workouts = previous.workouts; persistWorkouts();
+        profile = previous.profile; saveJSON(LS_PROFILE, profile);
+        attendance = previous.attendance; saveJSON(LS_ATTEND, attendance);
+        history = previous.history; persistHistory();
+        prs = previous.prs; persistPRs();
+        sessions = previous.sessions; persistSessions();
+        prlog = previous.prlog; persistPRLog();
         renderDayTabs();
         renderDayPanel();
+        if(document.getElementById('view-profile').classList.contains('active')) renderProfile();
       });
       e.target.value = '';
     };
@@ -1513,6 +1550,30 @@
     });
   }
 
+  /* Best-effort request that the browser NOT auto-evict this site's storage
+     under space pressure. Doesn't protect against the user (or the phone's
+     "free up space" tools) explicitly clearing site data, but helps against
+     silent automatic cleanup — which is the likelier cause of the data
+     disappearing on its own. */
+  if(navigator.storage && navigator.storage.persist){
+    navigator.storage.persist().catch(function(){});
+  }
+
+  /* Gently nudge toward exporting a backup if there's real data at risk and
+     it's been a while (or never) since the last export. */
+  function maybeSuggestBackup(){
+    var hasData = Object.keys(workouts).some(function(k){
+      return workouts[k] && workouts[k].exercises && workouts[k].exercises.length;
+    });
+    if(!hasData) return;
+    var last = loadJSON(LS_LAST_EXPORT, null);
+    var daysSince = last ? (new Date(todayKey()+'T00:00:00') - new Date(last+'T00:00:00')) / 86400000 : Infinity;
+    if(daysSince >= 7){
+      setTimeout(function(){ showToast('💾 Faça um backup: Perfil → Exportar backup completo'); }, 1400);
+    }
+  }
+  maybeSuggestBackup();
+
   /* ---------- INIT ---------- */
   applyTheme();
   updateOnlineStatus();
@@ -1527,7 +1588,7 @@
     var splash = document.getElementById('splash');
     if(!splash) return;
     var elapsed = Date.now() - (window.__gymappLoadStart || Date.now());
-    var minDelay = Math.max(0, 2500 - elapsed);
+    var minDelay = Math.max(0, 500 - elapsed);
     setTimeout(function(){
       splash.classList.add('hide');
       setTimeout(function(){ splash.remove(); }, 450);
