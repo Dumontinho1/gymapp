@@ -1,6 +1,6 @@
 /* Bump CACHE every time you deploy a change — changing this file's bytes is what
    makes the browser notice there's an update at all (identical sw.js = no update check). */
-const CACHE = 'gymapp-cache-v3';
+const CACHE = 'gymapp-cache-v4';
 const ASSETS = [
   './',
   './index.html',
