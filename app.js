@@ -15,6 +15,7 @@
   var LS_LAST_EXPORT = 'gymapp:lastExport';
 
   var DEFAULT_REST = 90;
+  var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
   var DAYS = [
     { idx:1, label:'Seg' }, { idx:2, label:'Ter' }, { idx:3, label:'Qua' },
@@ -23,6 +24,9 @@
   ];
   var MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   var WEEKDAY_FULL = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
+
+  function isObj(v){ return !!v && typeof v === 'object' && !Array.isArray(v); }
+  function deepCopy(o){ return JSON.parse(JSON.stringify(o)); }
 
   function loadJSON(key, fallback){
     try{
@@ -38,11 +42,20 @@
     if(autosaveTimer) clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(function(){ el.classList.remove('show'); }, 1100);
   }
+  var saveErrorShown = false;
   function saveJSON(key, val){
     try{
       localStorage.setItem(key, JSON.stringify(val));
       flashAutosave();
-    }catch(e){}
+      return true;
+    }catch(e){
+      if(!saveErrorShown){
+        saveErrorShown = true;
+        showToast('⚠ Não foi possível salvar — armazenamento cheio ou bloqueado. Exporte um backup!', 'error');
+        setTimeout(function(){ saveErrorShown = false; }, 10000);
+      }
+      return false;
+    }
   }
   function pad2(n){ return n<10 ? '0'+n : ''+n; }
   function todayKey(d){
@@ -60,9 +73,20 @@
   var calViewDate = new Date();
   var history = loadJSON(LS_HISTORY, {}); // { "supino reto": { date:"2026-09-10", sets:[{reps,load}] } }
   var prs = loadJSON(LS_PR, {}); // { "supino reto": { load:60, reps:"8", date:"2026-09-10" } }
-  var sessions = loadJSON(LS_SESSIONS, []); // [{ date, dayIdx, exercises:[{name, sets:[{reps,load}]}] }]
+  var sessions = loadJSON(LS_SESSIONS, []); // [{ date, dayIdx, exercises:[{name, sets:[{reps,load}]}], undo }]
   var prlog = loadJSON(LS_PRLOG, []); // [{ name, load, date }] — appended each time a PR is broken
   var notifPref = loadJSON(LS_NOTIF, false);
+
+  /* Guard against corrupted / wrong-typed data in localStorage */
+  if(!isObj(workouts)) workouts = {};
+  if(!isObj(attendance)) attendance = {};
+  if(!isObj(profile)) profile = { name:'', height:'', weightHistory:[] };
+  if(!Array.isArray(profile.weightHistory)) profile.weightHistory = [];
+  if(!isObj(history)) history = {};
+  if(!isObj(prs)) prs = {};
+  if(!Array.isArray(sessions)) sessions = [];
+  if(!Array.isArray(prlog)) prlog = [];
+  if(typeof selectedDay !== 'number' || selectedDay < 0 || selectedDay > 6) selectedDay = new Date().getDay();
 
   function getDayData(idx){
     if(!workouts[idx]) workouts[idx] = { name:'', exercises:[] };
@@ -72,31 +96,135 @@
   function historyKey(name){ return (name||'').trim().toLowerCase(); }
 
   function persistHistory(){ saveJSON(LS_HISTORY, history); }
-
-  /* Snapshot today's filled-in sets per exercise name, so next time it's trained
-     the previous performance shows up as a reference. Only exercises with at
-     least one filled set are recorded, and only once per exercise per day. */
   function persistSessions(){ saveJSON(LS_SESSIONS, sessions); }
+  function persistPRs(){ saveJSON(LS_PR, prs); }
+  function persistPRLog(){ saveJSON(LS_PRLOG, prlog); }
+  function persistAttendance(){ saveJSON(LS_ATTEND, attendance); }
+  function persistWorkouts(){
+    saveJSON(LS_WORKOUTS, workouts);
+    scheduleResync();
+  }
 
+  /* Snapshot of everything a completed session touches, so unmarking a day
+     (and its undo) can restore the exact previous state. */
+  function captureState(){
+    return {
+      attendance: deepCopy(attendance), history: deepCopy(history),
+      prs: deepCopy(prs), sessions: deepCopy(sessions), prlog: deepCopy(prlog)
+    };
+  }
+  function restoreState(s){
+    attendance = s.attendance; history = s.history; prs = s.prs;
+    sessions = s.sessions; prlog = s.prlog;
+    persistAttendance(); persistHistory(); persistPRs(); persistSessions(); persistPRLog();
+  }
+
+  /* Heaviest filled set of a list of sets, or null. */
+  function bestSet(sets){
+    var best = null;
+    sets.forEach(function(s){
+      var l = parseFloat(String(s.load).replace(',', '.'));
+      if(isNaN(l) || l <= 0) return;
+      if(!best || l > best.load) best = { load: l, reps: s.reps || '' };
+    });
+    return best;
+  }
+
+  /* Records the day's filled-in sets as a session: updates the "última vez"
+     reference per exercise, the session list (for the Progress tab) and the
+     personal records. A PR counts only when the session's heaviest set beats
+     the record from previously completed sessions — at most once per exercise
+     per session. Returns the list of broken records (first-ever entries don't
+     count). Everything that was changed is remembered in session.undo so
+     revertSession() can roll it back. */
   function snapshotHistoryForDay(dayIdx, dateKey){
     var data = getDayData(dayIdx);
     var k = dateKey || todayKey();
     var sessionExercises = [];
+    var undo = { history:{}, prs:{}, prlogKeys:[] };
+    var broken = [];
+
     data.exercises.forEach(function(ex){
+      var name = (ex.name || '').trim();
+      if(!name) return;
       var filledSets = ex.sets.filter(function(s){ return s.reps || s.load; });
       if(filledSets.length === 0) return;
       var setsCopy = filledSets.map(function(s){ return { reps: s.reps, load: s.load }; });
-      history[historyKey(ex.name)] = { date: k, sets: setsCopy };
-      sessionExercises.push({ name: ex.name, sets: setsCopy });
+      var key = historyKey(name);
+
+      if(!(key in undo.history)) undo.history[key] = history[key] || null;
+      history[key] = { date: k, sets: setsCopy };
+      sessionExercises.push({ name: name, sets: setsCopy });
+
+      var best = bestSet(setsCopy);
+      if(best){
+        var cur = prs[key];
+        if(!cur || best.load > cur.load){
+          if(!(key in undo.prs)) undo.prs[key] = cur || null;
+          prs[key] = { load: best.load, reps: best.reps, date: k };
+          if(cur){
+            prlog.push({ name: name, load: best.load, date: k });
+            undo.prlogKeys.push(key);
+            broken.push({ name: name, load: best.load });
+          }
+        }
+      }
     });
-    persistHistory();
+
+    persistHistory(); persistPRs(); persistPRLog();
 
     if(sessionExercises.length){
-      var record = { date: k, dayIdx: dayIdx, exercises: sessionExercises };
+      var record = { date: k, dayIdx: dayIdx, exercises: sessionExercises, undo: undo };
       var existingIdx = sessions.findIndex(function(s){ return s.date === k; });
       if(existingIdx > -1) sessions[existingIdx] = record; else sessions.push(record);
       persistSessions();
     }
+    return broken;
+  }
+
+  /* Removes the session logged on a date and rolls back the history/PR changes
+     it made (only where nothing newer has overwritten them since). */
+  function revertSession(k){
+    var idx = sessions.findIndex(function(s){ return s.date === k; });
+    if(idx < 0) return;
+    var u = sessions[idx].undo;
+    if(isObj(u)){
+      Object.keys(u.history || {}).forEach(function(key){
+        if(history[key] && history[key].date === k){
+          if(u.history[key]) history[key] = u.history[key]; else delete history[key];
+        }
+      });
+      Object.keys(u.prs || {}).forEach(function(key){
+        if(prs[key] && prs[key].date === k){
+          if(u.prs[key]) prs[key] = u.prs[key]; else delete prs[key];
+        }
+      });
+      if(Array.isArray(u.prlogKeys) && u.prlogKeys.length){
+        prlog = prlog.filter(function(e){
+          return !(e.date === k && u.prlogKeys.indexOf(historyKey(e.name)) > -1);
+        });
+      }
+    }
+    sessions.splice(idx, 1);
+    persistHistory(); persistPRs(); persistPRLog(); persistSessions();
+  }
+
+  /* If you edit sets of a day that's already marked as done, keep its logged
+     session in sync (debounced, silent). */
+  var resyncTimer = null;
+  function scheduleResync(){
+    var dayIdx = selectedDay;
+    var k = todayKey(mostRecentDateForWeekday(dayIdx));
+    if(!attendance[k]) return;
+    if(resyncTimer) clearTimeout(resyncTimer);
+    resyncTimer = setTimeout(function(){
+      resyncTimer = null;
+      if(!attendance[k]) return;
+      var existing = sessions.find(function(s){ return s.date === k; });
+      if(existing && existing.dayIdx !== dayIdx) return;
+      revertSession(k);
+      snapshotHistoryForDay(dayIdx, k);
+    }, 800);
   }
 
   /* Total volume (reps x load, summed across all filled sets) of one logged session. */
@@ -116,51 +244,34 @@
     return parts[2] + '/' + parts[1];
   }
 
-  /* ---------- PERSONAL RECORDS (heaviest load ever logged per exercise) ---------- */
-  function persistPRs(){ saveJSON(LS_PR, prs); }
-
-  /* Updates the stored PR for an exercise if the given load beats it.
-     Returns true only when an EXISTING record was just broken (not the
-     first-ever entry), which is the moment worth celebrating. */
-  function persistPRLog(){ saveJSON(LS_PRLOG, prlog); }
-
-  function checkAndUpdatePR(exName, loadStr, repsStr){
-    var load = parseFloat(String(loadStr).replace(',', '.'));
-    if(isNaN(load) || load <= 0) return false;
-    var key = historyKey(exName);
-    var current = prs[key];
-    var brokeRecord = !!current && load > current.load;
-    if(!current || load > current.load){
-      prs[key] = { load: load, reps: repsStr || '', date: todayKey() };
-      persistPRs();
-      if(brokeRecord){
-        prlog.push({ name: exName, load: load, date: todayKey() });
-        persistPRLog();
-      }
-    }
-    return brokeRecord;
-  }
-
-  /* ---------- TOAST (info / PR celebration / undo) ---------- */
+  /* ---------- TOAST (info / PR celebration / error / undo) ---------- */
   var toastEl = document.getElementById('toast');
   var toastMsgEl = document.getElementById('toastMsg');
   var toastUndoBtn = document.getElementById('toastUndoBtn');
   var toastTimer = null;
   var pendingUndo = null;
 
-  function showToast(msg){
+  function setToastKind(kind){
+    toastEl.classList.remove('pr', 'error');
+    if(kind) toastEl.classList.add(kind);
+  }
+
+  function showToast(msg, kind){
+    if(!toastEl) return;
     pendingUndo = null;
     toastUndoBtn.hidden = true;
+    setToastKind(kind);
     toastMsgEl.textContent = msg;
     toastEl.classList.add('show');
     if(toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 2600);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, kind === 'error' ? 5000 : 2600);
   }
 
   /* Shows a toast with a "Desfazer" button; if tapped before it expires, undoFn() runs. */
   function showUndoToast(msg, undoFn){
     pendingUndo = undoFn;
     toastUndoBtn.hidden = false;
+    setToastKind(null);
     toastMsgEl.textContent = msg;
     toastEl.classList.add('show');
     if(toastTimer) clearTimeout(toastTimer);
@@ -173,6 +284,14 @@
     toastEl.classList.remove('show');
     if(toastTimer) clearTimeout(toastTimer);
   });
+
+  function celebratePRs(broken){
+    var msg = broken.length === 1
+      ? '🏆 Novo recorde em ' + broken[0].name + ': ' + broken[0].load + 'kg!'
+      : '🏆 ' + broken.length + ' novos recordes: ' + broken.map(function(b){ return b.name; }).join(', ');
+    showToast(msg, 'pr');
+    if(navigator.vibrate) navigator.vibrate([80,40,80]);
+  }
 
   /* ---------- GENERIC CONFIRM MODAL (used by every delete/overwrite action) ---------- */
   var confirmBackdrop = document.getElementById('confirmModalBackdrop');
@@ -254,12 +373,14 @@
     wrap.innerHTML = '';
     var todayIdx = new Date().getDay();
     DAYS.forEach(function(d){
-      var el = document.createElement('div');
+      var el = document.createElement('button');
+      el.type = 'button';
       var hasEx = getDayData(d.idx).exercises.length > 0;
       el.className = 'day-tab'
         + (d.idx === selectedDay ? ' active' : '')
         + (d.idx === todayIdx ? ' is-today' : '')
         + (hasEx ? ' has-exercises' : '');
+      el.setAttribute('aria-pressed', d.idx === selectedDay ? 'true' : 'false');
       el.innerHTML = '<div class="dlabel">'+d.label+'</div><div class="ddot"></div>';
       el.addEventListener('click', function(){
         selectedDay = d.idx;
@@ -277,7 +398,6 @@
     var data = getDayData(selectedDay);
     var nameInput = document.getElementById('dayNameInput');
     nameInput.value = data.name || '';
-    document.getElementById('btnLiveStart').disabled = data.exercises.length === 0;
 
     var list = document.getElementById('exerciseList');
     list.innerHTML = '';
@@ -287,7 +407,6 @@
     data.exercises.forEach(function(ex){
       list.appendChild(buildExerciseCard(ex));
     });
-    resetRestTimer(false);
   }
 
   function buildExerciseCard(ex){
@@ -310,12 +429,23 @@
       + '<button class="icon-mini danger" data-act="del-ex" title="Remover exercício">🗑</button>'
       + '</div>';
     var exNameInput = head.querySelector('.exname-input');
+    var lastGoodName = ex.name;
     exNameInput.value = ex.name;
     exNameInput.addEventListener('input', function(){
       ex.name = exNameInput.value;
       persistWorkouts();
     });
     exNameInput.addEventListener('change', function(){
+      var trimmed = exNameInput.value.trim();
+      if(!trimmed){
+        ex.name = lastGoodName;
+        exNameInput.value = lastGoodName;
+        persistWorkouts();
+        return;
+      }
+      ex.name = trimmed;
+      lastGoodName = trimmed;
+      persistWorkouts();
       var parent = card.parentElement;
       if(!parent) return;
       var fresh = buildExerciseCard(ex);
@@ -323,18 +453,6 @@
       renderDayTabs();
     });
     card.appendChild(head);
-
-    function handlePRCheck(loadVal, repsVal){
-      var brokeRecord = checkAndUpdatePR(ex.name, loadVal, repsVal);
-      if(!brokeRecord) return;
-      var parent = card.parentElement;
-      if(!parent) return;
-      var freshCard = buildExerciseCard(ex);
-      freshCard.classList.add('pr-flash');
-      parent.replaceChild(freshCard, card);
-      showToast('🏆 Novo recorde em ' + ex.name + ': ' + prs[historyKey(ex.name)].load + 'kg!');
-      if(navigator.vibrate) navigator.vibrate([80,40,80]);
-    }
 
     var lastEntry = history[historyKey(ex.name)];
     if(lastEntry && lastEntry.date !== todayKey()){
@@ -350,7 +468,7 @@
     var rows = document.createElement('div');
     rows.className = 'set-rows';
     ex.sets.forEach(function(s, i){
-      rows.appendChild(buildSetRow(ex, s, i, prEntry, handlePRCheck));
+      rows.appendChild(buildSetRow(ex, s, i, prEntry));
     });
     card.appendChild(rows);
 
@@ -465,7 +583,7 @@
     });
   }
 
-  function buildSetRow(ex, s, i, prEntry, onPRCheck){
+  function buildSetRow(ex, s, i, prEntry){
     var row = document.createElement('div');
     row.className = 'set-row';
     var isPRSet = prEntry && s.load !== '' && parseFloat(s.load) === prEntry.load;
@@ -482,9 +600,6 @@
 
     repsInput.addEventListener('input', function(){ s.reps = repsInput.value; persistWorkouts(); });
     loadInput.addEventListener('input', function(){ s.load = loadInput.value; persistWorkouts(); });
-    loadInput.addEventListener('change', function(){
-      if(onPRCheck) onPRCheck(loadInput.value, repsInput.value);
-    });
 
     row.querySelector('.rm-set').addEventListener('click', async function(){
       var ok = await askConfirm('Remover série', 'Remover a série ' + (i+1) + ' de "' + ex.name + '"?', 'Remover');
@@ -501,8 +616,6 @@
 
     return row;
   }
-
-  function persistWorkouts(){ saveJSON(LS_WORKOUTS, workouts); }
 
   /* ---------- MODAL: ADD EXERCISE ---------- */
   var modalBackdrop = document.getElementById('modalBackdrop');
@@ -599,7 +712,7 @@
 
   /* ---------- TODAY CHECK BUTTON ---------- */
   function refreshAfterAttendanceChange(){
-    saveJSON(LS_ATTEND, attendance);
+    persistAttendance();
     renderTodayStrip();
     renderDayTabs();
     renderDayPanel();
@@ -609,16 +722,20 @@
     var targetDate = mostRecentDateForWeekday(selectedDay);
     var k = todayKey(targetDate);
     if(attendance[k]){
+      var backup = captureState();
+      if(resyncTimer){ clearTimeout(resyncTimer); resyncTimer = null; }
+      revertSession(k);
       delete attendance[k];
       refreshAfterAttendanceChange();
       showUndoToast('Treino desmarcado', function(){
-        attendance[k] = true;
+        restoreState(backup);
         refreshAfterAttendanceChange();
       });
     } else {
       attendance[k] = true;
-      snapshotHistoryForDay(selectedDay, k);
+      var broken = snapshotHistoryForDay(selectedDay, k);
       refreshAfterAttendanceChange();
+      if(broken.length) celebratePRs(broken);
     }
   });
 
@@ -670,6 +787,7 @@
   }
 
   function startRestFor(exerciseName, secs){
+    unlockAudio();
     REST_TOTAL = secs;
     restLabel = 'Descanso — ' + exerciseName;
     restRemaining = secs;
@@ -691,10 +809,11 @@
   /* Wake Lock: keep the screen on while resting so the countdown stays visible */
   var wakeLock = null;
   async function acquireWakeLock(){
-    if(!('wakeLock' in navigator)) return;
+    if(!('wakeLock' in navigator) || wakeLock) return;
     try{
-      wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release', function(){ wakeLock = null; });
+      var lock = await navigator.wakeLock.request('screen');
+      wakeLock = lock;
+      lock.addEventListener('release', function(){ if(wakeLock === lock) wakeLock = null; });
     }catch(e){ wakeLock = null; }
   }
   function releaseWakeLock(){
@@ -706,36 +825,58 @@
       if(!wakeLock) acquireWakeLock();
       tickRest(); // snap the display to the true elapsed time right away
     }
-    if(live.restRunning) tickLiveRest();
+    // the app can stay alive in memory across midnight — refresh "today"
+    renderTodayStrip();
+    renderDayTabs();
   });
+
+  /* Audio: a single AudioContext reused for every beep. Mobile browsers start
+     it suspended until a user gesture, so we resume it on any tap. */
+  var audioCtx = null;
+  function getAudioCtx(){
+    if(!audioCtx){
+      var Ctor = window.AudioContext || window.webkitAudioContext;
+      if(Ctor){ try{ audioCtx = new Ctor(); }catch(e){ audioCtx = null; } }
+    }
+    return audioCtx;
+  }
+  function unlockAudio(){
+    var ctx = getAudioCtx();
+    if(ctx && ctx.state === 'suspended') ctx.resume().catch(function(){});
+  }
+  document.addEventListener('pointerdown', unlockAudio, { passive:true });
+  document.addEventListener('touchend', unlockAudio, { passive:true });
 
   function beep(){
     try{
-      var ctx = new (window.AudioContext || window.webkitAudioContext)();
-      [0, 0.18, 0.36].forEach(function(t){
-        var o = ctx.createOscillator();
-        var g = ctx.createGain();
-        o.type = 'sine';
-        o.frequency.value = 880;
-        g.gain.value = 0.001;
-        o.connect(g); g.connect(ctx.destination);
-        var start = ctx.currentTime + t;
-        g.gain.setValueAtTime(0.001, start);
-        g.gain.exponentialRampToValueAtTime(0.25, start + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.001, start + 0.16);
-        o.start(start); o.stop(start + 0.18);
-      });
+      var ctx = getAudioCtx();
+      if(ctx){
+        if(ctx.state === 'suspended') ctx.resume().catch(function(){});
+        [0, 0.18, 0.36].forEach(function(t){
+          var o = ctx.createOscillator();
+          var g = ctx.createGain();
+          o.type = 'sine';
+          o.frequency.value = 880;
+          o.connect(g); g.connect(ctx.destination);
+          var start = ctx.currentTime + t;
+          g.gain.setValueAtTime(0.001, start);
+          g.gain.exponentialRampToValueAtTime(0.25, start + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.001, start + 0.16);
+          o.start(start); o.stop(start + 0.18);
+        });
+      }
     }catch(e){}
     if(navigator.vibrate) navigator.vibrate([200,80,200,80,200]);
   }
 
   /* Best-effort alert while the app is minimized: shows a silent system
      notification via the Service Worker so you notice rest is over even if
-     you're on another app. Android Chrome keeps this reliable in the
+     you're on another app. Only fires when the app is NOT visible (the beep
+     already covers the foreground). Android Chrome keeps this reliable in the
      background; iOS Safari's PWA background limits mean it mostly fires once
      you reopen/foreground the app rather than while deeply minimized. */
   function notifyRestDone(label){
-    if(!notifPref) return;
+    if(!notifPref || !document.hidden) return;
     if(!('Notification' in window) || Notification.permission !== 'granted') return;
     if(!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.ready.then(function(reg){
@@ -744,7 +885,7 @@
         silent: true,
         tag: 'gymapp-rest',
         renotify: true,
-        icon: 'icon.svg'
+        icon: 'icon-192.png'
       }).catch(function(){});
     });
   }
@@ -778,6 +919,7 @@
     if(autoStart){ toggleRest(); }
   }
   function toggleRest(){
+    unlockAudio();
     if(restRunning){
       restRunning = false;
       stopRestInterval();
@@ -1191,7 +1333,7 @@
     saveJSON(LS_NOTIF, notifPref);
   });
 
-  /* ---------- IMPORT / EXPORT WORKOUTS (JSON) ---------- */
+  /* ---------- IMPORT / EXPORT (JSON) ---------- */
   document.getElementById('btnExportWorkouts').addEventListener('click', function(){
     var payload = {
       app: 'GymApp', type: 'full-backup', version: 2, exportedAt: todayKey(),
@@ -1215,40 +1357,108 @@
     document.getElementById('importFileInput').click();
   });
 
+  /* Every sanitizer returns null when the value is the wrong shape, so a
+     malformed file can never put the app into a state that crashes on render. */
+  function str(v){ return v == null ? '' : String(v); }
+  function sanitizeSets(sets){
+    return (Array.isArray(sets) ? sets : []).filter(isObj).map(function(s){ return { reps: str(s.reps), load: str(s.load) }; });
+  }
+  function sanitizeProfile(p){
+    if(!isObj(p)) return null;
+    var wh = (Array.isArray(p.weightHistory) ? p.weightHistory : []).filter(function(w){
+      return isObj(w) && typeof w.date === 'string' && !isNaN(parseFloat(w.weight));
+    }).map(function(w){ return { date: w.date, weight: parseFloat(w.weight) }; });
+    return { name: str(p.name), height: str(p.height), weightHistory: wh };
+  }
+  function sanitizeAttendance(a){
+    if(!isObj(a)) return null;
+    var out = {};
+    Object.keys(a).forEach(function(k){ if(DATE_RE.test(k) && a[k]) out[k] = true; });
+    return out;
+  }
+  function sanitizeHistory(h){
+    if(!isObj(h)) return null;
+    var out = {};
+    Object.keys(h).forEach(function(k){
+      var e = h[k];
+      if(isObj(e) && typeof e.date === 'string' && DATE_RE.test(e.date)) out[k] = { date: e.date, sets: sanitizeSets(e.sets) };
+    });
+    return out;
+  }
+  function sanitizePRs(p){
+    if(!isObj(p)) return null;
+    var out = {};
+    Object.keys(p).forEach(function(k){
+      var e = p[k], l = isObj(e) ? parseFloat(e.load) : NaN;
+      if(!isNaN(l) && l > 0) out[k] = { load: l, reps: str(e.reps), date: str(e.date) };
+    });
+    return out;
+  }
+  function sanitizeSessions(arr){
+    if(!Array.isArray(arr)) return null;
+    return arr.filter(function(s){
+      return isObj(s) && typeof s.date === 'string' && DATE_RE.test(s.date) && Array.isArray(s.exercises);
+    }).map(function(s){
+      var rec = {
+        date: s.date,
+        dayIdx: typeof s.dayIdx === 'number' ? s.dayIdx : new Date(s.date + 'T00:00:00').getDay(),
+        exercises: s.exercises.filter(function(ex){ return isObj(ex) && typeof ex.name === 'string'; })
+          .map(function(ex){ return { name: ex.name, sets: sanitizeSets(ex.sets) }; })
+      };
+      if(isObj(s.undo)) rec.undo = s.undo;
+      return rec;
+    });
+  }
+  function sanitizePRLog(arr){
+    if(!Array.isArray(arr)) return null;
+    return arr.filter(function(e){ return isObj(e) && typeof e.name === 'string' && !isNaN(parseFloat(e.load)) && typeof e.date === 'string'; })
+      .map(function(e){ return { name: e.name, load: parseFloat(e.load), date: e.date }; });
+  }
+
   document.getElementById('importFileInput').addEventListener('change', function(e){
-    var file = e.target.files[0];
+    var input = e.target;
+    var file = input.files[0];
     if(!file) return;
     var reader = new FileReader();
     reader.onload = async function(){
       var data;
       try{ data = JSON.parse(reader.result); }
-      catch(err){ showToast('Arquivo inválido'); e.target.value = ''; return; }
+      catch(err){ showToast('Arquivo inválido'); input.value = ''; return; }
 
-      if(!data || typeof data !== 'object'){
+      if(!isObj(data)){
         showToast('Arquivo não reconhecido');
-        e.target.value = '';
+        input.value = '';
         return;
       }
 
       /* Older exports (and the sample ficha files) only carry `workouts` at
          the top level; full backups carry every store. Restore whichever
-         pieces are present. */
-      var importedWorkouts = data.workouts || (DAYS.some(function(d){ return data[String(d.idx)]; }) ? data : null);
+         pieces are present and well-formed. */
+      var importedWorkouts = isObj(data.workouts) ? data.workouts
+        : (DAYS.some(function(d){ return isObj(data[String(d.idx)]); }) ? data : null);
       var parts = [];
       var dayKeys = [];
       if(importedWorkouts){
-        dayKeys = Object.keys(importedWorkouts).filter(function(k){ return DAYS.some(function(d){ return String(d.idx) === k; }); });
+        dayKeys = Object.keys(importedWorkouts).filter(function(k){
+          return DAYS.some(function(d){ return String(d.idx) === k; }) && isObj(importedWorkouts[k]);
+        });
         if(dayKeys.length) parts.push('ficha (' + dayKeys.map(function(k){ return WEEKDAY_FULL[parseInt(k,10)]; }).join(', ') + ')');
       }
-      if(data.profile) parts.push('perfil (nome/peso/altura)');
-      if(data.attendance) parts.push('calendário de treinos');
-      if(data.history) parts.push('histórico de "última vez"');
-      if(data.prs) parts.push('recordes pessoais');
-      if(data.sessions) parts.push('sessões (progresso)');
+      var nProfile = sanitizeProfile(data.profile);
+      var nAttendance = sanitizeAttendance(data.attendance);
+      var nHistory = sanitizeHistory(data.history);
+      var nPRs = sanitizePRs(data.prs);
+      var nSessions = sanitizeSessions(data.sessions);
+      var nPRLog = sanitizePRLog(data.prlog);
+      if(nProfile) parts.push('perfil (nome/peso/altura)');
+      if(nAttendance) parts.push('calendário de treinos');
+      if(nHistory) parts.push('histórico de "última vez"');
+      if(nPRs) parts.push('recordes pessoais');
+      if(nSessions) parts.push('sessões (progresso)');
 
       if(parts.length === 0){
         showToast('Nenhum dado reconhecido no arquivo');
-        e.target.value = '';
+        input.value = '';
         return;
       }
 
@@ -1257,52 +1467,48 @@
         'Isso vai substituir: ' + parts.join('; ') + '. Continuar?',
         'Importar'
       );
-      if(!ok){ e.target.value = ''; return; }
+      if(!ok){ input.value = ''; return; }
 
-      var previous = {
-        workouts: JSON.parse(JSON.stringify(workouts)), profile: JSON.parse(JSON.stringify(profile)),
-        attendance: JSON.parse(JSON.stringify(attendance)), history: JSON.parse(JSON.stringify(history)),
-        prs: JSON.parse(JSON.stringify(prs)), sessions: JSON.parse(JSON.stringify(sessions)), prlog: JSON.parse(JSON.stringify(prlog))
-      };
+      var previous = captureState();
+      previous.workouts = deepCopy(workouts);
+      previous.profile = deepCopy(profile);
 
-      if(importedWorkouts && dayKeys.length){
+      if(dayKeys.length){
         dayKeys.forEach(function(k){
           var importedDay = importedWorkouts[k];
-          var exercises = (importedDay.exercises || []).map(function(ex){
+          var exercises = (Array.isArray(importedDay.exercises) ? importedDay.exercises : []).filter(isObj).map(function(ex){
             return {
               id: ex.id || uid(),
-              name: ex.name || 'Exercício',
-              restSeconds: ex.restSeconds || DEFAULT_REST,
-              sets: (ex.sets || []).map(function(s){ return { reps: s.reps || '', load: s.load || '' }; })
+              name: ex.name ? String(ex.name) : 'Exercício',
+              restSeconds: parseInt(ex.restSeconds, 10) || DEFAULT_REST,
+              sets: sanitizeSets(ex.sets)
             };
           });
-          workouts[k] = { name: importedDay.name || '', exercises: exercises };
+          workouts[k] = { name: str(importedDay.name), exercises: exercises };
         });
-        persistWorkouts();
+        saveJSON(LS_WORKOUTS, workouts);
       }
-      if(data.profile){ profile = data.profile; saveJSON(LS_PROFILE, profile); }
-      if(data.attendance){ attendance = data.attendance; saveJSON(LS_ATTEND, attendance); }
-      if(data.history){ history = data.history; persistHistory(); }
-      if(data.prs){ prs = data.prs; persistPRs(); }
-      if(data.sessions){ sessions = data.sessions; persistSessions(); }
-      if(data.prlog){ prlog = data.prlog; persistPRLog(); }
+      if(nProfile){ profile = nProfile; saveJSON(LS_PROFILE, profile); }
+      if(nAttendance){ attendance = nAttendance; persistAttendance(); }
+      if(nHistory){ history = nHistory; persistHistory(); }
+      if(nPRs){ prs = nPRs; persistPRs(); }
+      if(nSessions){ sessions = nSessions; persistSessions(); }
+      if(nPRLog){ prlog = nPRLog; persistPRLog(); }
 
+      renderTodayStrip();
       renderDayTabs();
       renderDayPanel();
       if(document.getElementById('view-profile').classList.contains('active')) renderProfile();
       showUndoToast('Backup importado (' + parts.join('; ') + ')', function(){
-        workouts = previous.workouts; persistWorkouts();
+        workouts = previous.workouts; saveJSON(LS_WORKOUTS, workouts);
         profile = previous.profile; saveJSON(LS_PROFILE, profile);
-        attendance = previous.attendance; saveJSON(LS_ATTEND, attendance);
-        history = previous.history; persistHistory();
-        prs = previous.prs; persistPRs();
-        sessions = previous.sessions; persistSessions();
-        prlog = previous.prlog; persistPRLog();
+        restoreState(previous);
+        renderTodayStrip();
         renderDayTabs();
         renderDayPanel();
         if(document.getElementById('view-profile').classList.contains('active')) renderProfile();
       });
-      e.target.value = '';
+      input.value = '';
     };
     reader.readAsText(file);
   });
@@ -1312,227 +1518,16 @@
     btn.addEventListener('click', function(){ switchView(btn.dataset.view); });
   });
 
-  /* ---------- LIVE WORKOUT MODE ---------- */
-  function formatMMSS(total){
-    var m = Math.floor(total/60), s = total%60;
-    return pad2(m) + ':' + pad2(s);
-  }
-
-  var live = {
-    exercises: [], exIndex: 0, setIndex: 0, startTime: 0,
-    volume: 0, prCount: 0, restInterval: null, restRemaining: 0,
-    restTotal: 0, restRunning: false, restEndAt: 0, elapsedInterval: null
-  };
-
-  var liveOverlay = document.getElementById('liveOverlay');
-  var liveScreenMain = document.getElementById('liveScreenMain');
-  var liveRestBanner = document.getElementById('liveRestBanner');
-  var liveSummaryEl = document.getElementById('liveSummary');
-  var liveRingFg = document.getElementById('liveRingFg');
-  var LIVE_RING_CIRC = 2 * Math.PI * 52;
-  liveRingFg.style.strokeDasharray = LIVE_RING_CIRC;
-
-  function openLiveMode(){
-    var data = getDayData(selectedDay);
-    if(!data.exercises.length) return;
-    live.exercises = data.exercises;
-    live.exIndex = 0;
-    live.setIndex = 0;
-    live.startTime = Date.now();
-    live.volume = 0;
-    live.prCount = 0;
-    liveSummaryEl.classList.remove('show');
-    liveRestBanner.classList.remove('show');
-    liveOverlay.classList.add('open');
-    renderLiveSet();
-    updateLiveElapsed();
-    live.elapsedInterval = setInterval(updateLiveElapsed, 1000);
-    acquireWakeLock();
-  }
-
-  function updateLiveElapsed(){
-    var secs = Math.floor((Date.now() - live.startTime) / 1000);
-    document.getElementById('liveElapsed').textContent = formatMMSS(secs);
-  }
-
-  function currentLiveExercise(){ return live.exercises[live.exIndex]; }
-
-  function renderLiveSet(){
-    var ex = currentLiveExercise();
-    if(!ex){ finishLiveWorkout(); return; }
-    if(ex.restSeconds == null) ex.restSeconds = DEFAULT_REST;
-    var set = ex.sets[live.setIndex];
-    if(!set){ goNextExercise(); return; }
-
-    var totalSets = live.exercises.reduce(function(sum,e){ return sum + e.sets.length; }, 0);
-    var doneSets = 0;
-    for(var i=0;i<live.exIndex;i++) doneSets += live.exercises[i].sets.length;
-    doneSets += live.setIndex;
-    document.getElementById('liveProgressFill').style.width = (totalSets ? (doneSets/totalSets*100) : 0) + '%';
-    document.getElementById('liveStep').textContent = 'Exercício ' + (live.exIndex+1) + ' de ' + live.exercises.length;
-    document.getElementById('liveExName').textContent = ex.name;
-
-    var prEntry = prs[historyKey(ex.name)];
-    var prBadge = document.getElementById('liveExPR');
-    if(prEntry){ prBadge.hidden = false; prBadge.textContent = '🏆 PR: ' + prEntry.load + 'kg'; }
-    else prBadge.hidden = true;
-
-    var lastEntry = history[historyKey(ex.name)];
-    var lastEl = document.getElementById('liveExLast');
-    if(lastEntry && lastEntry.date !== todayKey()){
-      lastEl.hidden = false;
-      lastEl.textContent = 'Última vez (' + formatDateShort(lastEntry.date) + '): '
-        + lastEntry.sets.map(function(s){ return (s.reps||'-')+'×'+(s.load||'-')+'kg'; }).join(', ');
-    } else {
-      lastEl.hidden = true;
+  /* ---------- KEYBOARD: Esc closes modals, Enter submits "new exercise" ---------- */
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape'){
+      if(confirmBackdrop.classList.contains('open')) closeConfirm(false);
+      else if(copyModalBackdrop.classList.contains('open')) closeCopyModal();
+      else if(modalBackdrop.classList.contains('open')) closeModal();
+    } else if(e.key === 'Enter' && modalBackdrop.classList.contains('open')
+              && (e.target.id === 'exNameInput' || e.target.id === 'exSetsInput')){
+      document.getElementById('modalSave').click();
     }
-
-    document.getElementById('liveSetLabel').textContent = 'Série ' + (live.setIndex+1) + ' de ' + ex.sets.length;
-    document.getElementById('liveRepsInput').value = set.reps;
-    document.getElementById('liveLoadInput').value = set.load;
-
-    document.getElementById('livePrevEx').disabled = (live.exIndex === 0);
-    document.getElementById('liveNextEx').disabled = (live.exIndex === live.exercises.length - 1);
-  }
-
-  function goNextExercise(){
-    live.exIndex++;
-    live.setIndex = 0;
-    if(live.exIndex >= live.exercises.length){ finishLiveWorkout(); return; }
-    renderLiveSet();
-  }
-
-  function updateLiveRingFg(){
-    var frac = live.restTotal ? live.restRemaining / live.restTotal : 0;
-    liveRingFg.style.strokeDashoffset = LIVE_RING_CIRC * (1-frac);
-    liveRingFg.classList.toggle('warn', live.restRemaining <= 15 && live.restRemaining > 0);
-  }
-
-  function startLiveRest(secs){
-    live.restTotal = secs;
-    live.restRemaining = secs;
-    live.restEndAt = Date.now() + secs*1000;
-    live.restRunning = true;
-    liveRestBanner.classList.add('show');
-    document.getElementById('liveRestTime').textContent = formatMMSS(secs);
-    updateLiveRingFg();
-    acquireWakeLock();
-    clearInterval(live.restInterval);
-    live.restInterval = setInterval(tickLiveRest, 1000);
-  }
-
-  function tickLiveRest(){
-    if(!live.restRunning) return;
-    live.restRemaining = Math.max(0, Math.round((live.restEndAt - Date.now()) / 1000));
-    if(live.restRemaining <= 0){
-      live.restRemaining = 0;
-      clearInterval(live.restInterval);
-      live.restRunning = false;
-      beep();
-      notifyRestDone(currentLiveExercise() ? currentLiveExercise().name : 'Treino ao vivo');
-      endLiveRest();
-      return;
-    }
-    document.getElementById('liveRestTime').textContent = formatMMSS(live.restRemaining);
-    updateLiveRingFg();
-  }
-
-  function endLiveRest(){
-    live.restRunning = false;
-    liveRestBanner.classList.remove('show');
-    var ex = currentLiveExercise();
-    if(ex && live.setIndex >= ex.sets.length) goNextExercise();
-    else renderLiveSet();
-  }
-
-  function finishLiveWorkout(){
-    live.restRunning = false;
-    clearInterval(live.elapsedInterval);
-    clearInterval(live.restInterval);
-    liveRestBanner.classList.remove('show');
-    releaseWakeLock();
-    var elapsedSecs = Math.floor((Date.now() - live.startTime)/1000);
-    document.getElementById('summaryTime').textContent = formatMMSS(elapsedSecs);
-    document.getElementById('summaryVolume').textContent = Math.round(live.volume) + ' kg';
-    document.getElementById('summaryPRs').textContent = live.prCount;
-    liveSummaryEl.classList.add('show');
-  }
-
-  document.getElementById('btnLiveStart').addEventListener('click', openLiveMode);
-
-  document.getElementById('liveCompleteSet').addEventListener('click', function(){
-    var ex = currentLiveExercise();
-    var set = ex.sets[live.setIndex];
-    var reps = document.getElementById('liveRepsInput').value;
-    var load = document.getElementById('liveLoadInput').value;
-    set.reps = reps; set.load = load;
-    persistWorkouts();
-
-    var r = parseFloat(reps), l = parseFloat(load);
-    if(!isNaN(r) && !isNaN(l)) live.volume += r*l;
-
-    var brokeRecord = checkAndUpdatePR(ex.name, load, reps);
-    if(brokeRecord){
-      live.prCount++;
-      showToast('🏆 Novo recorde em ' + ex.name + ': ' + prs[historyKey(ex.name)].load + 'kg!');
-      if(navigator.vibrate) navigator.vibrate([80,40,80]);
-    }
-
-    live.setIndex++;
-    var restSecs = ex.restSeconds || DEFAULT_REST;
-    var hasMore = live.setIndex < ex.sets.length || live.exIndex < live.exercises.length - 1;
-    if(hasMore) startLiveRest(restSecs);
-    else finishLiveWorkout();
-  });
-
-  document.getElementById('liveSkipRest').addEventListener('click', function(){
-    live.restRunning = false;
-    clearInterval(live.restInterval);
-    endLiveRest();
-  });
-
-  document.getElementById('liveNextEx').addEventListener('click', function(){
-    live.restRunning = false;
-    clearInterval(live.restInterval);
-    liveRestBanner.classList.remove('show');
-    live.exIndex = Math.min(live.exIndex+1, live.exercises.length-1);
-    live.setIndex = 0;
-    renderLiveSet();
-  });
-  document.getElementById('livePrevEx').addEventListener('click', function(){
-    live.restRunning = false;
-    clearInterval(live.restInterval);
-    liveRestBanner.classList.remove('show');
-    live.exIndex = Math.max(live.exIndex-1, 0);
-    live.setIndex = 0;
-    renderLiveSet();
-  });
-
-  document.getElementById('liveClose').addEventListener('click', async function(){
-    var ok = await askConfirm(
-      'Encerrar treino ao vivo',
-      'As séries já preenchidas foram salvas, mas o treino não será marcado como concluído no calendário. Encerrar mesmo assim?',
-      'Encerrar'
-    );
-    if(!ok) return;
-    live.restRunning = false;
-    clearInterval(live.restInterval);
-    clearInterval(live.elapsedInterval);
-    liveRestBanner.classList.remove('show');
-    liveSummaryEl.classList.remove('show');
-    liveOverlay.classList.remove('open');
-    releaseWakeLock();
-    renderDayPanel();
-    renderDayTabs();
-  });
-
-  document.getElementById('liveSummaryClose').addEventListener('click', function(){
-    liveSummaryEl.classList.remove('show');
-    liveOverlay.classList.remove('open');
-    var k = todayKey(mostRecentDateForWeekday(selectedDay));
-    if(!attendance[k]) attendance[k] = true;
-    snapshotHistoryForDay(selectedDay, k);
-    refreshAfterAttendanceChange();
   });
 
   /* ---------- ONLINE / OFFLINE BADGE ---------- */
