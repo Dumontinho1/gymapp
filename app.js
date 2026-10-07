@@ -1,4 +1,4 @@
-/* GymApp - offline-first workout tracker */
+﻿/* GymApp - offline-first workout tracker */
 (function(){
   'use strict';
 
@@ -13,9 +13,25 @@
   var LS_PRLOG = 'gymapp:prlog';
   var LS_NOTIF = 'gymapp:notifPref';
   var LS_LAST_EXPORT = 'gymapp:lastExport';
+  var LS_ACCENT = 'gymapp:accent';
+  var LS_ACCENT_COLORS = 'gymapp:accentColors'; // [a, b] — read by the inline <head> script to avoid a color flash
+  var LS_BADGES = 'gymapp:badges';
 
   var DEFAULT_REST = 90;
+  var SET_SECONDS = 45;      // assumed time under tension per set (calorie estimate)
+  var WORKOUT_MET = 5;       // metabolic equivalent for moderate-vigorous weight training
+  var DEFAULT_WEIGHT_KG = 70;
   var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  /* Sanity limits — anything outside is treated as invalid input (typos,
+     corrupted or hand-edited backups) instead of poisoning stats/records. */
+  var MAX_LOAD = 2000;       // kg
+  var MAX_REPS = 1000;
+  var MAX_SETS = 50;
+  var MAX_EXERCISES = 100;
+  var MIN_REST = 10, MAX_REST = 600;
+  var MIN_WEIGHT = 20, MAX_WEIGHT = 400;
+  var MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 
   var DAYS = [
     { idx:1, label:'Seg' }, { idx:2, label:'Ter' }, { idx:3, label:'Qua' },
@@ -27,6 +43,22 @@
 
   function isObj(v){ return !!v && typeof v === 'object' && !Array.isArray(v); }
   function deepCopy(o){ return JSON.parse(JSON.stringify(o)); }
+  function clamp(n, lo, hi){ return Math.max(lo, Math.min(hi, n)); }
+
+  /* Parses a user-entered number (accepts "62,5"); returns NaN unless it is
+     finite, > 0 and <= max. Used everywhere loads/reps are read so negative,
+     absurd or non-numeric values can't corrupt volume, PRs or charts. */
+  function num(v, max){
+    var n = parseFloat(String(v == null ? '' : v).replace(',', '.'));
+    return (isFinite(n) && n > 0 && n <= max) ? n : NaN;
+  }
+
+  /* Strict "YYYY-MM-DD" check that also rejects impossible dates (2026-02-31). */
+  function isValidDateKey(s){
+    if(typeof s !== 'string' || !DATE_RE.test(s)) return false;
+    var d = new Date(s + 'T00:00:00');
+    return !isNaN(d.getTime()) && todayKey(d) === s;
+  }
 
   function loadJSON(key, fallback){
     try{
@@ -76,8 +108,12 @@
   var sessions = loadJSON(LS_SESSIONS, []); // [{ date, dayIdx, exercises:[{name, sets:[{reps,load}]}], undo }]
   var prlog = loadJSON(LS_PRLOG, []); // [{ name, load, date }] — appended each time a PR is broken
   var notifPref = loadJSON(LS_NOTIF, false);
+  var accentId = loadJSON(LS_ACCENT, 'violet');
+  var badges = loadJSON(LS_BADGES, {}); // { badgeId: "2026-09-15" } — unlock date
 
   /* Guard against corrupted / wrong-typed data in localStorage */
+  if(!isObj(badges)) badges = {};
+  if(typeof accentId !== 'string') accentId = 'violet';
   if(!isObj(workouts)) workouts = {};
   if(!isObj(attendance)) attendance = {};
   if(!isObj(profile)) profile = { name:'', height:'', weightHistory:[] };
@@ -93,17 +129,37 @@
     return workouts[idx];
   }
 
-  function historyKey(name){ return (name||'').trim().toLowerCase(); }
+  /* Lookup key for an exercise name. Names like "constructor" or "__proto__"
+     would collide with Object.prototype members when used as plain-object keys
+     (prs["constructor"] would be a function), so they get a suffix. */
+  function historyKey(name){
+    var k = (name || '').trim().toLowerCase();
+    return (k in Object.prototype) ? k + ' ' : k;
+  }
 
   function persistHistory(){ saveJSON(LS_HISTORY, history); }
   function persistSessions(){ saveJSON(LS_SESSIONS, sessions); }
   function persistPRs(){ saveJSON(LS_PR, prs); }
   function persistPRLog(){ saveJSON(LS_PRLOG, prlog); }
   function persistAttendance(){ saveJSON(LS_ATTEND, attendance); }
-  function persistWorkouts(){
+  function persistBadges(){ saveJSON(LS_BADGES, badges); }
+
+  /* Workout edits fire on every keystroke; the localStorage write is debounced
+     and always flushed when the page is hidden/closed so nothing is lost. */
+  var workoutsSaveTimer = null;
+  function flushWorkouts(){
+    if(workoutsSaveTimer){ clearTimeout(workoutsSaveTimer); workoutsSaveTimer = null; }
     saveJSON(LS_WORKOUTS, workouts);
+  }
+  function persistWorkouts(){
+    if(workoutsSaveTimer) clearTimeout(workoutsSaveTimer);
+    workoutsSaveTimer = setTimeout(flushWorkouts, 300);
     scheduleResync();
   }
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'hidden' && workoutsSaveTimer) flushWorkouts();
+  });
+  window.addEventListener('pagehide', function(){ if(workoutsSaveTimer) flushWorkouts(); });
 
   /* Snapshot of everything a completed session touches, so unmarking a day
      (and its undo) can restore the exact previous state. */
@@ -113,7 +169,11 @@
       prs: deepCopy(prs), sessions: deepCopy(sessions), prlog: deepCopy(prlog)
     };
   }
+  function cancelResync(){
+    if(resyncTimer){ clearTimeout(resyncTimer); resyncTimer = null; }
+  }
   function restoreState(s){
+    cancelResync(); // a pending resync would otherwise overwrite the restored sessions
     attendance = s.attendance; history = s.history; prs = s.prs;
     sessions = s.sessions; prlog = s.prlog;
     persistAttendance(); persistHistory(); persistPRs(); persistSessions(); persistPRLog();
@@ -123,8 +183,8 @@
   function bestSet(sets){
     var best = null;
     sets.forEach(function(s){
-      var l = parseFloat(String(s.load).replace(',', '.'));
-      if(isNaN(l) || l <= 0) return;
+      var l = num(s.load, MAX_LOAD);
+      if(isNaN(l)) return;
       if(!best || l > best.load) best = { load: l, reps: s.reps || '' };
     });
     return best;
@@ -154,7 +214,7 @@
 
       if(!(key in undo.history)) undo.history[key] = history[key] || null;
       history[key] = { date: k, sets: setsCopy };
-      sessionExercises.push({ name: name, sets: setsCopy });
+      sessionExercises.push({ name: name, sets: setsCopy, rest: ex.restSeconds || DEFAULT_REST });
 
       var best = bestSet(setsCopy);
       if(best){
@@ -232,7 +292,7 @@
     var total = 0;
     session.exercises.forEach(function(ex){
       ex.sets.forEach(function(s){
-        var r = parseFloat(s.reps), l = parseFloat(s.load);
+        var r = num(s.reps, MAX_REPS), l = num(s.load, MAX_LOAD);
         if(!isNaN(r) && !isNaN(l)) total += r * l;
       });
     });
@@ -240,8 +300,9 @@
   }
 
   function formatDateShort(dateKey){
+    if(typeof dateKey !== 'string') return '--/--';
     var parts = dateKey.split('-');
-    return parts[2] + '/' + parts[1];
+    return parts.length === 3 ? parts[2] + '/' + parts[1] : '--/--';
   }
 
   /* ---------- TOAST (info / PR celebration / error / undo) ---------- */
@@ -293,6 +354,245 @@
     if(navigator.vibrate) navigator.vibrate([80,40,80]);
   }
 
+  /* ---------- ACCENT COLOR ---------- */
+  var ACCENTS = [
+    { id:'violet', label:'Roxo',     a:'#8b5cf6', b:'#06b6d4' },
+    { id:'blue',   label:'Azul',     a:'#3b82f6', b:'#22d3ee' },
+    { id:'green',  label:'Verde',    a:'#22c55e', b:'#a3e635' },
+    { id:'orange', label:'Laranja',  a:'#f97316', b:'#f43f5e' },
+    { id:'pink',   label:'Rosa',     a:'#ec4899', b:'#8b5cf6' },
+    { id:'red',    label:'Vermelho', a:'#ef4444', b:'#f59e0b' }
+  ];
+
+  function applyAccent(){
+    var c = ACCENTS.find(function(x){ return x.id === accentId; }) || ACCENTS[0];
+    var root = document.documentElement.style;
+    root.setProperty('--accent', c.a);
+    root.setProperty('--accent-2', c.b);
+    root.setProperty('--accent-grad', 'linear-gradient(135deg,' + c.a + ',' + c.b + ')');
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if(meta) meta.setAttribute('content', c.a);
+    try{ localStorage.setItem(LS_ACCENT_COLORS, JSON.stringify([c.a, c.b])); }catch(e){}
+  }
+
+  function renderAccentPicker(){
+    var wrap = document.getElementById('accentPicker');
+    if(!wrap) return;
+    wrap.innerHTML = '';
+    ACCENTS.forEach(function(c){
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'accent-swatch' + (c.id === accentId ? ' active' : '');
+      btn.style.background = 'linear-gradient(135deg,' + c.a + ',' + c.b + ')';
+      btn.title = c.label;
+      btn.setAttribute('aria-label', 'Cor ' + c.label);
+      btn.addEventListener('click', function(){
+        accentId = c.id;
+        saveJSON(LS_ACCENT, accentId);
+        applyAccent();
+        renderAccentPicker();
+      });
+      wrap.appendChild(btn);
+    });
+  }
+
+  /* ---------- STATS shared by badges / calories ---------- */
+  function daysBetween(a, b){
+    return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
+  }
+
+  function computeStats(){
+    var keys = Object.keys(attendance).filter(function(k){ return attendance[k] && isValidDateKey(k); });
+    var perMonth = {}, perWeek = {};
+    keys.forEach(function(k){
+      var mk = k.slice(0, 7);
+      perMonth[mk] = (perMonth[mk] || 0) + 1;
+      var wk = todayKey(startOfWeek(new Date(k + 'T00:00:00')));
+      perWeek[wk] = (perWeek[wk] || 0) + 1;
+    });
+    var bestMonth = 0;
+    Object.keys(perMonth).forEach(function(m){ if(perMonth[m] > bestMonth) bestMonth = perMonth[m]; });
+
+    // longest run of consecutive weeks with at least 3 trainings
+    var activeWeeks = Object.keys(perWeek).filter(function(w){ return perWeek[w] >= 3; }).sort();
+    var weekStreak = 0, run = 0;
+    activeWeeks.forEach(function(w, i){
+      run = (i > 0 && daysBetween(activeWeeks[i-1], w) === 7) ? run + 1 : 1;
+      if(run > weekStreak) weekStreak = run;
+    });
+
+    var maxSessionVol = 0, totalVol = 0, names = {};
+    sessions.forEach(function(s){
+      var v = sessionVolume(s);
+      totalVol += v;
+      if(v > maxSessionVol) maxSessionVol = v;
+      s.exercises.forEach(function(ex){ names[historyKey(ex.name)] = true; });
+    });
+
+    return {
+      total: keys.length, bestMonth: bestMonth, weekStreak: weekStreak,
+      prCount: prlog.length, maxSessionVol: maxSessionVol, totalVol: totalVol,
+      distinct: Object.keys(names).length
+    };
+  }
+
+  /* ---------- BADGES (derived from existing data; once unlocked they stay) ---------- */
+  var BADGE_DEFS = [
+    { id:'first', icon:'🎯', title:'Primeiro treino',  desc:'Conclua 1 treino',                       prog:function(s){ return [s.total, 1]; } },
+    { id:'t10',   icon:'🔟', title:'Pegando ritmo',    desc:'Conclua 10 treinos',                     prog:function(s){ return [s.total, 10]; } },
+    { id:'t50',   icon:'💪', title:'Frequentador',     desc:'Conclua 50 treinos',                     prog:function(s){ return [s.total, 50]; } },
+    { id:'t100',  icon:'💯', title:'Centenário',       desc:'Conclua 100 treinos',                    prog:function(s){ return [s.total, 100]; } },
+    { id:'m10',   icon:'📅', title:'Mês de ferro',     desc:'Treine 10x no mesmo mês',                prog:function(s){ return [s.bestMonth, 10]; } },
+    { id:'w4',    icon:'🔥', title:'Constância',       desc:'4 semanas seguidas com 3+ treinos',      prog:function(s){ return [s.weekStreak, 4]; } },
+    { id:'pr1',   icon:'🏆', title:'Primeiro recorde', desc:'Bata 1 recorde pessoal',                 prog:function(s){ return [s.prCount, 1]; } },
+    { id:'pr10',  icon:'🥇', title:'Quebra-recordes',  desc:'Bata 10 recordes pessoais',              prog:function(s){ return [s.prCount, 10]; } },
+    { id:'ton',   icon:'🏋️', title:'Tonelada',         desc:'1.000 kg de volume em um treino',        prog:function(s){ return [s.maxSessionVol, 1000]; } },
+    { id:'vol50', icon:'🚛', title:'50 toneladas',     desc:'50.000 kg de volume total',              prog:function(s){ return [s.totalVol, 50000]; } },
+    { id:'var10', icon:'🧩', title:'Variado',          desc:'Treine 10 exercícios diferentes',        prog:function(s){ return [s.distinct, 10]; } }
+  ];
+
+  /* Unlocks any newly earned badges and returns them. Called silently on
+     startup (backfills history without toasts) and with a toast after
+     marking a workout. */
+  function evaluateBadges(precomputedStats){
+    var stats = precomputedStats || computeStats();
+    var fresh = [];
+    BADGE_DEFS.forEach(function(d){
+      if(badges[d.id]) return;
+      var p = d.prog(stats);
+      if(p[0] >= p[1]){ badges[d.id] = todayKey(); fresh.push(d); }
+    });
+    if(fresh.length) persistBadges();
+    return fresh;
+  }
+
+  function celebrateBadges(list){
+    var msg = list.length === 1
+      ? '🏅 Conquista: ' + list[0].title + '!'
+      : '🏅 ' + list.length + ' conquistas: ' + list.map(function(b){ return b.title; }).join(', ');
+    showToast(msg, 'pr');
+  }
+
+  function formatCount(n){ return isFinite(n) ? Math.floor(n).toLocaleString('pt-BR') : '0'; }
+
+  function renderBadges(){
+    var stats = computeStats(); // computed once and shared with evaluateBadges
+    evaluateBadges(stats);
+    var grid = document.getElementById('badgeGrid');
+    grid.innerHTML = '';
+    var unlocked = 0;
+    BADGE_DEFS.forEach(function(d){
+      var done = !!badges[d.id];
+      if(done) unlocked++;
+      var p = d.prog(stats);
+      var item = document.createElement('div');
+      item.className = 'badge-item' + (done ? ' unlocked' : '');
+      item.innerHTML = '<div class="badge-icon"></div><div class="badge-title"></div><div class="badge-desc"></div><div class="badge-prog"></div>';
+      item.querySelector('.badge-icon').textContent = d.icon;
+      item.querySelector('.badge-title').textContent = d.title;
+      item.querySelector('.badge-desc').textContent = d.desc;
+      item.querySelector('.badge-prog').textContent = done
+        ? 'Desbloqueada em ' + formatDateShort(badges[d.id])
+        : formatCount(Math.min(p[0], p[1])) + ' / ' + formatCount(p[1]);
+      grid.appendChild(item);
+    });
+    document.getElementById('badgeCount').textContent = unlocked + ' / ' + BADGE_DEFS.length;
+  }
+
+  /* ---------- CALORIE ESTIMATE ---------- */
+  /* Weight registered on (or most recently before) the given date; falls back
+     to the earliest registered weight, then null. */
+  function weightAt(dateKey){
+    var h = profile.weightHistory || [];
+    var best = null;
+    h.forEach(function(w){ if(w.date <= dateKey) best = w; });
+    if(!best && h.length) best = h[0];
+    var kg = best ? parseFloat(best.weight) : NaN;
+    return (isNaN(kg) || kg <= 0) ? null : kg;
+  }
+
+  /* kcal ≈ MET × weight(kg) × hours. Duration is inferred from the logged sets
+     (time under tension + that exercise's rest), since sessions have no timer. */
+  function estimateSessionKcal(s){
+    var secs = 0;
+    s.exercises.forEach(function(ex){
+      var rest = ex.rest || DEFAULT_REST;
+      secs += ex.sets.length * (SET_SECONDS + rest);
+    });
+    var kg = weightAt(s.date) || DEFAULT_WEIGHT_KG;
+    return WORKOUT_MET * kg * (secs / 3600);
+  }
+
+  function renderKcal(){
+    var now = new Date();
+    var thisMonthKey = monthKey(now);
+    var weekAgoKey = todayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6));
+    var todayStr = todayKey(now);
+    var month = 0, week = 0, count = 0, totalAll = 0;
+    sessions.forEach(function(s){
+      var k = estimateSessionKcal(s);
+      totalAll += k; count++;
+      if(s.date.slice(0, 7) === thisMonthKey) month += k;
+      if(s.date >= weekAgoKey && s.date <= todayStr) week += k;
+    });
+    document.getElementById('kcalMonth').textContent = formatCount(month) + ' kcal';
+    document.getElementById('kcalWeek').textContent = formatCount(week) + ' kcal';
+    document.getElementById('kcalAvg').textContent = count ? formatCount(totalAll / count) + ' kcal' : '–';
+    document.getElementById('kcalHint').textContent = weightAt(todayStr) == null
+      ? 'Usando ' + DEFAULT_WEIGHT_KG + ' kg — informe seu peso no Perfil para uma estimativa melhor. Valor aproximado.'
+      : 'Estimativa aproximada: ~' + SET_SECONDS + 's por série + descanso, intensidade moderada. Não substitui medição real.';
+  }
+
+  /* ---------- YEAR HEATMAP (last 53 weeks, Monday-first columns) ---------- */
+  function renderHeatmap(){
+    var COLS = 53;
+    var wrap = document.getElementById('heatmap');
+    var labels = document.getElementById('heatmapMonths');
+    wrap.innerHTML = '';
+    labels.innerHTML = '';
+
+    var thisMonday = startOfWeek(new Date());
+    var vols = {}, maxVol = 1;
+    sessions.forEach(function(s){
+      vols[s.date] = sessionVolume(s);
+      if(vols[s.date] > maxVol) maxVol = vols[s.date];
+    });
+    var todayStr = todayKey();
+    var total = 0;
+
+    for(var c = 0; c < COLS; c++){
+      var monday = new Date(thisMonday.getFullYear(), thisMonday.getMonth(), thisMonday.getDate() - (COLS - 1 - c) * 7);
+      if(monday.getDate() <= 7){
+        var lab = document.createElement('span');
+        lab.textContent = MONTHS[monday.getMonth()].slice(0, 3);
+        // never span past the last column, or the grid grows implicit columns and misaligns
+        lab.style.gridColumn = (c + 1) + ' / span ' + Math.min(3, COLS - c);
+        labels.appendChild(lab);
+      }
+      for(var r = 0; r < 7; r++){
+        var day = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + r);
+        var key = todayKey(day);
+        var cell = document.createElement('div');
+        var cls = 'hm';
+        if(key > todayStr){
+          cls += ' future';
+        } else if(attendance[key]){
+          total++;
+          var v = vols[key];
+          var lvl = v ? Math.min(4, Math.max(1, Math.ceil(v / maxVol * 4))) : 1;
+          cls += ' hm-' + lvl;
+          cell.title = pad2(day.getDate()) + '/' + pad2(day.getMonth() + 1) + (v ? ' · ' + formatCount(v) + ' kg' : ' · treino concluído');
+        } else {
+          cls += ' hm-0';
+        }
+        if(key === todayStr) cls += ' hm-today';
+        cell.className = cls;
+        wrap.appendChild(cell);
+      }
+    }
+    document.getElementById('heatmapCount').textContent = total + (total === 1 ? ' treino' : ' treinos') + ' em 12 meses';
+  }
+
   /* ---------- GENERIC CONFIRM MODAL (used by every delete/overwrite action) ---------- */
   var confirmBackdrop = document.getElementById('confirmModalBackdrop');
   var confirmTitleEl = document.getElementById('confirmModalTitle');
@@ -301,16 +601,23 @@
   var confirmCancelBtn = document.getElementById('confirmModalCancel');
   var confirmResolver = null;
 
+  var confirmReturnFocus = null;
+
   function askConfirm(title, message, okLabel){
+    if(confirmResolver){ confirmResolver(false); confirmResolver = null; } // never leave a caller awaiting forever
     confirmTitleEl.textContent = title;
     confirmMsgEl.textContent = message;
     confirmOkBtn.textContent = okLabel || 'Remover';
+    if(!confirmBackdrop.classList.contains('open')) confirmReturnFocus = document.activeElement;
     confirmBackdrop.classList.add('open');
+    confirmCancelBtn.focus(); // safe default for destructive prompts
     return new Promise(function(resolve){ confirmResolver = resolve; });
   }
   function closeConfirm(result){
     confirmBackdrop.classList.remove('open');
     if(confirmResolver){ confirmResolver(result); confirmResolver = null; }
+    if(confirmReturnFocus && confirmReturnFocus.focus){ try{ confirmReturnFocus.focus(); }catch(e){} }
+    confirmReturnFocus = null;
   }
   confirmOkBtn.addEventListener('click', function(){ closeConfirm(true); });
   confirmCancelBtn.addEventListener('click', function(){ closeConfirm(false); });
@@ -382,15 +689,46 @@
         + (hasEx ? ' has-exercises' : '');
       el.setAttribute('aria-pressed', d.idx === selectedDay ? 'true' : 'false');
       el.innerHTML = '<div class="dlabel">'+d.label+'</div><div class="ddot"></div>';
-      el.addEventListener('click', function(){
-        selectedDay = d.idx;
-        saveJSON(LS_LASTDAY, selectedDay);
-        renderDayTabs();
-        renderDayPanel();
-        renderCheckButton();
-      });
+      el.addEventListener('click', function(){ selectDay(d.idx); });
       wrap.appendChild(el);
     });
+  }
+
+  function selectDay(idx){
+    selectedDay = idx;
+    saveJSON(LS_LASTDAY, selectedDay);
+    renderDayTabs();
+    renderDayPanel();
+    renderCheckButton();
+  }
+
+  /* Next weekday (after `fromIdx`, wrapping the week) that has exercises. */
+  function findNextTrainingDay(fromIdx){
+    for(var step = 1; step <= 6; step++){
+      var idx = (fromIdx + step) % 7;
+      if(getDayData(idx).exercises.length > 0) return idx;
+    }
+    return null;
+  }
+
+  function buildRestDayCard(){
+    var box = document.createElement('div');
+    box.className = 'rest-day';
+    var isToday = selectedDay === new Date().getDay();
+    box.innerHTML = '<div class="rest-day-emoji">😴</div><div class="rest-day-title"></div><div class="rest-day-sub"></div>';
+    box.querySelector('.rest-day-title').textContent = isToday ? 'Hoje é dia de descanso' : 'Dia de descanso';
+    box.querySelector('.rest-day-sub').textContent = 'Nenhum treino cadastrado para ' + WEEKDAY_FULL[selectedDay] + '. Recupere bem — o músculo cresce no descanso.';
+    var next = findNextTrainingDay(selectedDay);
+    if(next != null){
+      var nd = getDayData(next);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'rest-day-next';
+      btn.textContent = 'Próximo treino: ' + WEEKDAY_FULL[next] + (nd.name ? ' — ' + nd.name : '') + ' →';
+      btn.addEventListener('click', function(){ selectDay(next); });
+      box.appendChild(btn);
+    }
+    return box;
   }
 
   /* ---------- DAY PANEL / EXERCISES ---------- */
@@ -402,7 +740,9 @@
     var list = document.getElementById('exerciseList');
     list.innerHTML = '';
     if(data.exercises.length === 0){
-      list.innerHTML = '<div class="empty-state">Nenhum exercício ainda.<br>Toque em "Adicionar exercício" para começar.</div>';
+      var anyWorkout = DAYS.some(function(d){ return getDayData(d.idx).exercises.length > 0; });
+      if(anyWorkout) list.appendChild(buildRestDayCard());
+      else list.innerHTML = '<div class="empty-state">Nenhum exercício ainda.<br>Toque em "Adicionar exercício" para começar.</div>';
     }
     data.exercises.forEach(function(ex){
       list.appendChild(buildExerciseCard(ex));
@@ -421,13 +761,19 @@
     var head = document.createElement('div');
     head.className = 'exercise-card-head';
     head.innerHTML = '<div class="exname-wrap">'
-      + '<button class="drag-handle" title="Arrastar para reordenar">⠿</button>'
-      + '<input type="text" class="exname-input" maxlength="40" title="Toque para renomear">'
-      + (prEntry ? '<span class="pr-badge">🏆 ' + prEntry.load + 'kg</span>' : '')
+      + '<button class="drag-handle" title="Arrastar para reordenar" aria-label="Arrastar para reordenar">⠿</button>'
+      + '<input type="text" class="exname-input" maxlength="40" title="Toque para renomear" aria-label="Nome do exercício">'
       + '</div>'
       + '<div class="exercise-actions">'
-      + '<button class="icon-mini danger" data-act="del-ex" title="Remover exercício">🗑</button>'
+      + '<button class="icon-mini danger" data-act="del-ex" title="Remover exercício" aria-label="Remover exercício">🗑</button>'
       + '</div>';
+    if(prEntry){
+      // built with textContent (never innerHTML) — record data can come from imported files
+      var prBadge = document.createElement('span');
+      prBadge.className = 'pr-badge';
+      prBadge.textContent = '🏆 ' + prEntry.load + 'kg';
+      head.querySelector('.exname-wrap').appendChild(prBadge);
+    }
     var exNameInput = head.querySelector('.exname-input');
     var lastGoodName = ex.name;
     exNameInput.value = ex.name;
@@ -461,7 +807,12 @@
       var summary = lastEntry.sets.map(function(s){
         return (s.reps || '-') + '×' + (s.load || '-') + 'kg';
       }).join(', ');
-      lastLine.innerHTML = '<span class="lt-label">Última vez (' + formatDateShort(lastEntry.date) + '):</span>' + summary;
+      // textContent only: set values may originate from an imported backup (XSS vector via innerHTML)
+      var ltLabel = document.createElement('span');
+      ltLabel.className = 'lt-label';
+      ltLabel.textContent = 'Última vez (' + formatDateShort(lastEntry.date) + '):';
+      lastLine.appendChild(ltLabel);
+      lastLine.appendChild(document.createTextNode(summary));
       card.appendChild(lastLine);
     }
 
@@ -492,7 +843,13 @@
     restSecsInput.value = ex.restSeconds;
     restSecsInput.addEventListener('input', function(){
       var v = parseInt(restSecsInput.value, 10);
-      if(!isNaN(v) && v > 0) ex.restSeconds = v;
+      if(!isNaN(v) && v >= MIN_REST && v <= MAX_REST){ ex.restSeconds = v; persistWorkouts(); }
+    });
+    // out-of-range or empty values are corrected once typing is done (clamping per keystroke would block typing "120")
+    restSecsInput.addEventListener('change', function(){
+      var v = parseInt(restSecsInput.value, 10);
+      ex.restSeconds = isNaN(v) ? (ex.restSeconds || DEFAULT_REST) : clamp(v, MIN_REST, MAX_REST);
+      restSecsInput.value = ex.restSeconds;
       persistWorkouts();
     });
     restRow.querySelector('.btn-start-ex-rest').addEventListener('click', function(){
@@ -572,10 +929,12 @@
           .filter(function(c){ return c.classList.contains('exercise-card'); })
           .map(function(c){ return c.dataset.exId; });
         var data = getDayData(selectedDay);
+        var oldOrder = data.exercises.map(function(x){ return x.id; }).join('|');
         data.exercises.sort(function(a, b){
           return newOrderIds.indexOf(a.id) - newOrderIds.indexOf(b.id);
         });
-        persistWorkouts();
+        // only persist (and trigger a session resync) when the order actually changed
+        if(data.exercises.map(function(x){ return x.id; }).join('|') !== oldOrder) persistWorkouts();
       }
       handle.addEventListener('pointermove', onMove);
       handle.addEventListener('pointerup', onUp);
@@ -586,12 +945,13 @@
   function buildSetRow(ex, s, i, prEntry){
     var row = document.createElement('div');
     row.className = 'set-row';
-    var isPRSet = prEntry && s.load !== '' && parseFloat(s.load) === prEntry.load;
+    var isPRSet = prEntry && num(s.load, MAX_LOAD) === prEntry.load;
     row.innerHTML =
       '<div class="setnum">'+(i+1)+'</div>'
-      + '<div class="setfield"><input type="number" inputmode="numeric" min="0" placeholder="0" class="reps-input"><span class="unit">reps</span></div>'
-      + '<div class="setfield' + (isPRSet ? ' pr-set' : '') + '"><input type="number" inputmode="decimal" min="0" step="0.5" placeholder="0" class="load-input"><span class="unit">kg</span>' + (isPRSet ? '<span class="pr-icon">🏆</span>' : '') + '</div>'
-      + '<button class="rm-set" title="Remover série">✕</button>';
+      + '<div class="setfield"><input type="number" inputmode="numeric" min="0" max="' + MAX_REPS + '" placeholder="0" class="reps-input" aria-label="Repetições da série ' + (i+1) + '"><span class="unit">reps</span></div>'
+      + '<div class="setfield' + (isPRSet ? ' pr-set' : '') + '"><input type="number" inputmode="decimal" min="0" max="' + MAX_LOAD + '" step="0.5" placeholder="0" class="load-input" aria-label="Carga da série ' + (i+1) + ' em kg"><span class="unit">kg</span>' + (isPRSet ? '<span class="pr-icon">🏆</span>' : '') + '</div>'
+      + '<button class="copy-set" title="Copiar da série anterior / última vez" aria-label="Copiar da série anterior">⧉</button>'
+      + '<button class="rm-set" title="Remover série" aria-label="Remover série ' + (i+1) + '">✕</button>';
 
     var repsInput = row.querySelector('.reps-input');
     var loadInput = row.querySelector('.load-input');
@@ -600,6 +960,24 @@
 
     repsInput.addEventListener('input', function(){ s.reps = repsInput.value; persistWorkouts(); });
     loadInput.addEventListener('input', function(){ s.load = loadInput.value; persistWorkouts(); });
+
+    /* One tap fills this set from the previous set of the same exercise; for
+       the first set (or when the previous one is empty) it falls back to the
+       matching set of the last logged session. */
+    row.querySelector('.copy-set').addEventListener('click', function(){
+      var src = null;
+      var prev = i > 0 ? ex.sets[i-1] : null;
+      if(prev && (prev.reps || prev.load)){
+        src = prev;
+      } else {
+        var h = history[historyKey(ex.name)];
+        if(h && h.sets && h.sets.length) src = h.sets[Math.min(i, h.sets.length - 1)];
+      }
+      if(!src || !(src.reps || src.load)){ showToast('Nada para copiar ainda'); return; }
+      s.reps = src.reps; s.load = src.load;
+      repsInput.value = s.reps; loadInput.value = s.load;
+      persistWorkouts();
+    });
 
     row.querySelector('.rm-set').addEventListener('click', async function(){
       var ok = await askConfirm('Remover série', 'Remover a série ' + (i+1) + ' de "' + ex.name + '"?', 'Remover');
@@ -734,8 +1112,10 @@
     } else {
       attendance[k] = true;
       var broken = snapshotHistoryForDay(selectedDay, k);
+      var newBadges = evaluateBadges();
       refreshAfterAttendanceChange();
       if(broken.length) celebratePRs(broken);
+      if(newBadges.length) setTimeout(function(){ celebrateBadges(newBadges); }, broken.length ? 2900 : 0);
     }
   });
 
@@ -808,26 +1188,38 @@
 
   /* Wake Lock: keep the screen on while resting so the countdown stays visible */
   var wakeLock = null;
+  var wakeLockPending = false;
   async function acquireWakeLock(){
-    if(!('wakeLock' in navigator) || wakeLock) return;
+    // `pending` guards the async gap: two quick calls must not each take a lock (the first would leak)
+    if(!('wakeLock' in navigator) || wakeLock || wakeLockPending) return;
+    wakeLockPending = true;
     try{
       var lock = await navigator.wakeLock.request('screen');
+      if(!restRunning){ lock.release().catch(function(){}); return; } // timer stopped while we were waiting
       wakeLock = lock;
       lock.addEventListener('release', function(){ if(wakeLock === lock) wakeLock = null; });
     }catch(e){ wakeLock = null; }
+    finally{ wakeLockPending = false; }
   }
   function releaseWakeLock(){
     if(wakeLock){ wakeLock.release().catch(function(){}); wakeLock = null; }
   }
+
+  /* The app can stay alive in memory across midnight, so when it comes back to
+     the foreground re-render "today" — but only if the date actually changed. */
+  var lastRenderedDay = todayKey();
   document.addEventListener('visibilitychange', function(){
     if(document.visibilityState !== 'visible') return;
     if(restRunning){
       if(!wakeLock) acquireWakeLock();
       tickRest(); // snap the display to the true elapsed time right away
     }
-    // the app can stay alive in memory across midnight — refresh "today"
-    renderTodayStrip();
-    renderDayTabs();
+    var nowKey = todayKey();
+    if(nowKey !== lastRenderedDay){
+      lastRenderedDay = nowKey;
+      renderTodayStrip();
+      renderDayTabs();
+    }
   });
 
   /* Audio: a single AudioContext reused for every beep. Mobile browsers start
@@ -951,6 +1343,8 @@
     renderBMI();
     renderStats();
     renderCalendar();
+    renderHeatmap();
+    renderAccentPicker();
   }
 
   function renderBMI(){
@@ -958,7 +1352,8 @@
     var hist = profile.weightHistory || [];
     var weight = hist.length ? parseFloat(hist[hist.length-1].weight) : NaN;
     var heightCm = parseFloat(profile.height);
-    if(isNaN(weight) || isNaN(heightCm) || heightCm <= 0){
+    // hide the badge for implausible values instead of showing a nonsense BMI
+    if(isNaN(weight) || isNaN(heightCm) || heightCm < 80 || heightCm > 260 || weight < MIN_WEIGHT || weight > MAX_WEIGHT){
       badge.hidden = true;
       return;
     }
@@ -985,8 +1380,14 @@
     renderBMI();
   });
   profileWeightEl.addEventListener('change', function(){
-    var v = parseFloat(profileWeightEl.value);
-    if(isNaN(v) || v <= 0) return;
+    var v = parseFloat(String(profileWeightEl.value).replace(',', '.'));
+    if(isNaN(v) || v < MIN_WEIGHT || v > MAX_WEIGHT){
+      showToast('Peso inválido — use um valor entre ' + MIN_WEIGHT + ' e ' + MAX_WEIGHT + ' kg', 'error');
+      var hist = profile.weightHistory || [];
+      profileWeightEl.value = hist.length ? hist[hist.length-1].weight : '';
+      return;
+    }
+    v = Math.round(v * 10) / 10;
     if(!profile.weightHistory) profile.weightHistory = [];
     var last = profile.weightHistory[profile.weightHistory.length-1];
     if(last && last.date === todayKey()){
@@ -1088,9 +1489,11 @@
 
   function renderProgress(){
     renderVolumeCompare();
+    renderKcal();
     renderWeekBars();
     renderExercisePicker();
     renderPRRanking();
+    renderBadges();
   }
 
   function renderVolumeCompare(){
@@ -1163,12 +1566,18 @@
     });
   }
 
+  /* One entry per exercise, de-duplicated by the same key the data uses
+     ("Supino" and "supino " are the same exercise); keeps the first spelling seen. */
   function collectExerciseNames(){
-    var names = {};
+    var byKey = {};
     sessions.forEach(function(s){
-      s.exercises.forEach(function(ex){ names[ex.name] = true; });
+      s.exercises.forEach(function(ex){
+        var k = historyKey(ex.name);
+        if(!(k in byKey)) byKey[k] = ex.name;
+      });
     });
-    return Object.keys(names).sort(function(a,b){ return a.localeCompare(b, 'pt-BR'); });
+    return Object.keys(byKey).map(function(k){ return byKey[k]; })
+      .sort(function(a,b){ return a.localeCompare(b, 'pt-BR'); });
   }
 
   function renderExercisePicker(){
@@ -1209,7 +1618,7 @@
       if(!ex) return;
       var maxLoad = 0;
       ex.sets.forEach(function(st){
-        var l = parseFloat(st.load);
+        var l = num(st.load, MAX_LOAD);
         if(!isNaN(l) && l > maxLoad) maxLoad = l;
       });
       if(maxLoad > 0) points.push({ date: s.date, load: maxLoad });
@@ -1338,7 +1747,7 @@
     var payload = {
       app: 'GymApp', type: 'full-backup', version: 2, exportedAt: todayKey(),
       workouts: workouts, profile: profile, attendance: attendance,
-      history: history, prs: prs, sessions: sessions, prlog: prlog
+      history: history, prs: prs, sessions: sessions, prlog: prlog, badges: badges
     };
     var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     var url = URL.createObjectURL(blob);
@@ -1358,68 +1767,160 @@
   });
 
   /* Every sanitizer returns null when the value is the wrong shape, so a
-     malformed file can never put the app into a state that crashes on render. */
-  function str(v){ return v == null ? '' : String(v); }
+     malformed backup (or corrupted localStorage) can never put the app into a
+     state that crashes on render. Object keys that collide with
+     Object.prototype members are dropped (prototype-pollution guard), strings
+     are length-capped and numbers range-checked. */
+  function str(v, max){
+    var s = v == null ? '' : String(v);
+    return max ? s.slice(0, max) : s;
+  }
+  function safeKeys(o){
+    return Object.keys(o).filter(function(k){ return !(k in Object.prototype); });
+  }
   function sanitizeSets(sets){
-    return (Array.isArray(sets) ? sets : []).filter(isObj).map(function(s){ return { reps: str(s.reps), load: str(s.load) }; });
+    return (Array.isArray(sets) ? sets : []).filter(isObj).slice(0, MAX_SETS).map(function(s){
+      return { reps: str(s.reps, 12), load: str(s.load, 12) };
+    });
+  }
+  function sanitizeWorkoutDay(day){
+    var seen = Object.create(null);
+    var exercises = (Array.isArray(day.exercises) ? day.exercises : []).filter(isObj).slice(0, MAX_EXERCISES).map(function(ex){
+      var cand = typeof ex.id === 'string' ? ex.id.slice(0, 40) : '';
+      var id = (cand && !seen[cand]) ? cand : uid(); // ids must be unique: drag-reorder maps cards by id
+      seen[id] = true;
+      var rest = parseInt(ex.restSeconds, 10);
+      return {
+        id: id,
+        name: str(ex.name, 40).trim() || 'Exercício',
+        restSeconds: isNaN(rest) ? DEFAULT_REST : clamp(rest, MIN_REST, MAX_REST),
+        sets: sanitizeSets(ex.sets)
+      };
+    });
+    return { name: str(day.name, 30), exercises: exercises };
+  }
+  function sanitizeWorkouts(w){
+    if(!isObj(w)) return null;
+    var out = {};
+    DAYS.forEach(function(d){
+      var k = String(d.idx);
+      if(Object.prototype.hasOwnProperty.call(w, k) && isObj(w[k])) out[k] = sanitizeWorkoutDay(w[k]);
+    });
+    return out;
   }
   function sanitizeProfile(p){
     if(!isObj(p)) return null;
     var wh = (Array.isArray(p.weightHistory) ? p.weightHistory : []).filter(function(w){
-      return isObj(w) && typeof w.date === 'string' && !isNaN(parseFloat(w.weight));
-    }).map(function(w){ return { date: w.date, weight: parseFloat(w.weight) }; });
-    return { name: str(p.name), height: str(p.height), weightHistory: wh };
+      var kg = isObj(w) ? parseFloat(w.weight) : NaN;
+      return isValidDateKey(w && w.date) && kg >= MIN_WEIGHT && kg <= MAX_WEIGHT;
+    }).map(function(w){ return { date: w.date, weight: Math.round(parseFloat(w.weight) * 10) / 10 }; })
+      .sort(function(a, b){ return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); }).slice(-1000);
+    return { name: str(p.name, 24), height: str(p.height, 6), weightHistory: wh };
   }
   function sanitizeAttendance(a){
     if(!isObj(a)) return null;
     var out = {};
-    Object.keys(a).forEach(function(k){ if(DATE_RE.test(k) && a[k]) out[k] = true; });
+    safeKeys(a).forEach(function(k){ if(isValidDateKey(k) && a[k]) out[k] = true; });
     return out;
   }
   function sanitizeHistory(h){
     if(!isObj(h)) return null;
     var out = {};
-    Object.keys(h).forEach(function(k){
+    safeKeys(h).forEach(function(k){
       var e = h[k];
-      if(isObj(e) && typeof e.date === 'string' && DATE_RE.test(e.date)) out[k] = { date: e.date, sets: sanitizeSets(e.sets) };
+      if(isObj(e) && isValidDateKey(e.date)) out[k] = { date: e.date, sets: sanitizeSets(e.sets) };
     });
     return out;
   }
   function sanitizePRs(p){
     if(!isObj(p)) return null;
     var out = {};
-    Object.keys(p).forEach(function(k){
-      var e = p[k], l = isObj(e) ? parseFloat(e.load) : NaN;
-      if(!isNaN(l) && l > 0) out[k] = { load: l, reps: str(e.reps), date: str(e.date) };
+    safeKeys(p).forEach(function(k){
+      var e = p[k], l = isObj(e) ? num(e.load, MAX_LOAD) : NaN;
+      if(!isNaN(l)) out[k] = { load: l, reps: str(e.reps, 12), date: str(e.date, 10) };
     });
+    return out;
+  }
+  /* session.undo holds snapshots used to roll a session back; validate the shape too */
+  function sanitizeUndo(u){
+    if(!isObj(u)) return null;
+    var out = { history:{}, prs:{}, prlogKeys:[] };
+    if(isObj(u.history)) safeKeys(u.history).forEach(function(k){
+      var e = u.history[k];
+      if(e === null) out.history[k] = null;
+      else if(isObj(e) && isValidDateKey(e.date)) out.history[k] = { date: e.date, sets: sanitizeSets(e.sets) };
+    });
+    if(isObj(u.prs)) safeKeys(u.prs).forEach(function(k){
+      var e = u.prs[k], l = isObj(e) ? num(e.load, MAX_LOAD) : NaN;
+      if(e === null) out.prs[k] = null;
+      else if(!isNaN(l)) out.prs[k] = { load: l, reps: str(e.reps, 12), date: str(e.date, 10) };
+    });
+    if(Array.isArray(u.prlogKeys)) out.prlogKeys = u.prlogKeys.filter(function(k){ return typeof k === 'string'; }).slice(0, MAX_EXERCISES);
     return out;
   }
   function sanitizeSessions(arr){
     if(!Array.isArray(arr)) return null;
-    return arr.filter(function(s){
-      return isObj(s) && typeof s.date === 'string' && DATE_RE.test(s.date) && Array.isArray(s.exercises);
-    }).map(function(s){
+    var byDate = Object.create(null); // one session per date (later entries win)
+    arr.forEach(function(s){
+      if(!isObj(s) || !isValidDateKey(s.date) || !Array.isArray(s.exercises)) return;
       var rec = {
         date: s.date,
-        dayIdx: typeof s.dayIdx === 'number' ? s.dayIdx : new Date(s.date + 'T00:00:00').getDay(),
-        exercises: s.exercises.filter(function(ex){ return isObj(ex) && typeof ex.name === 'string'; })
-          .map(function(ex){ return { name: ex.name, sets: sanitizeSets(ex.sets) }; })
+        dayIdx: (typeof s.dayIdx === 'number' && s.dayIdx >= 0 && s.dayIdx <= 6) ? s.dayIdx : new Date(s.date + 'T00:00:00').getDay(),
+        exercises: s.exercises.filter(function(ex){ return isObj(ex) && typeof ex.name === 'string' && ex.name.trim(); })
+          .slice(0, MAX_EXERCISES).map(function(ex){
+            var out = { name: str(ex.name, 40), sets: sanitizeSets(ex.sets) };
+            var rest = parseInt(ex.rest, 10);
+            if(!isNaN(rest)) out.rest = clamp(rest, MIN_REST, MAX_REST);
+            return out;
+          })
       };
-      if(isObj(s.undo)) rec.undo = s.undo;
-      return rec;
+      var undo = sanitizeUndo(s.undo);
+      if(undo) rec.undo = undo;
+      byDate[s.date] = rec;
     });
+    return Object.keys(byDate).sort().map(function(d){ return byDate[d]; });
   }
   function sanitizePRLog(arr){
     if(!Array.isArray(arr)) return null;
-    return arr.filter(function(e){ return isObj(e) && typeof e.name === 'string' && !isNaN(parseFloat(e.load)) && typeof e.date === 'string'; })
-      .map(function(e){ return { name: e.name, load: parseFloat(e.load), date: e.date }; });
+    return arr.filter(function(e){
+      return isObj(e) && typeof e.name === 'string' && e.name.trim() && !isNaN(num(e.load, MAX_LOAD)) && isValidDateKey(e.date);
+    }).slice(-5000).map(function(e){ return { name: str(e.name, 40), load: num(e.load, MAX_LOAD), date: e.date }; });
+  }
+  function sanitizeBadges(b){
+    if(!isObj(b)) return null;
+    var known = {};
+    BADGE_DEFS.forEach(function(d){ known[d.id] = true; });
+    var out = {};
+    Object.keys(known).forEach(function(k){
+      if(Object.prototype.hasOwnProperty.call(b, k) && isValidDateKey(b[k])) out[k] = b[k];
+    });
+    return out;
+  }
+
+  /* Run every stored value through the same sanitizers used for imports, so
+     legacy/corrupted localStorage can't crash a render later. */
+  function normalizeLoadedState(){
+    workouts = sanitizeWorkouts(workouts) || {};
+    attendance = sanitizeAttendance(attendance) || {};
+    profile = sanitizeProfile(profile) || { name:'', height:'', weightHistory:[] };
+    history = sanitizeHistory(history) || {};
+    prs = sanitizePRs(prs) || {};
+    sessions = sanitizeSessions(sessions) || [];
+    prlog = sanitizePRLog(prlog) || [];
+    badges = sanitizeBadges(badges) || {};
   }
 
   document.getElementById('importFileInput').addEventListener('change', function(e){
     var input = e.target;
     var file = input.files[0];
     if(!file) return;
+    if(file.size > MAX_IMPORT_BYTES){
+      showToast('Arquivo grande demais (máx. 5 MB)', 'error');
+      input.value = '';
+      return;
+    }
     var reader = new FileReader();
+    reader.onerror = function(){ showToast('Não foi possível ler o arquivo', 'error'); input.value = ''; };
     reader.onload = async function(){
       var data;
       try{ data = JSON.parse(reader.result); }
@@ -1434,16 +1935,10 @@
       /* Older exports (and the sample ficha files) only carry `workouts` at
          the top level; full backups carry every store. Restore whichever
          pieces are present and well-formed. */
-      var importedWorkouts = isObj(data.workouts) ? data.workouts
-        : (DAYS.some(function(d){ return isObj(data[String(d.idx)]); }) ? data : null);
+      var nWorkouts = sanitizeWorkouts(isObj(data.workouts) ? data.workouts : data);
       var parts = [];
-      var dayKeys = [];
-      if(importedWorkouts){
-        dayKeys = Object.keys(importedWorkouts).filter(function(k){
-          return DAYS.some(function(d){ return String(d.idx) === k; }) && isObj(importedWorkouts[k]);
-        });
-        if(dayKeys.length) parts.push('ficha (' + dayKeys.map(function(k){ return WEEKDAY_FULL[parseInt(k,10)]; }).join(', ') + ')');
-      }
+      var dayKeys = nWorkouts ? Object.keys(nWorkouts) : [];
+      if(dayKeys.length) parts.push('ficha (' + dayKeys.map(function(k){ return WEEKDAY_FULL[parseInt(k,10)]; }).join(', ') + ')');
       var nProfile = sanitizeProfile(data.profile);
       var nAttendance = sanitizeAttendance(data.attendance);
       var nHistory = sanitizeHistory(data.history);
@@ -1455,6 +1950,8 @@
       if(nHistory) parts.push('histórico de "última vez"');
       if(nPRs) parts.push('recordes pessoais');
       if(nSessions) parts.push('sessões (progresso)');
+      var nBadges = sanitizeBadges(data.badges);
+      if(nBadges) parts.push('conquistas');
 
       if(parts.length === 0){
         showToast('Nenhum dado reconhecido no arquivo');
@@ -1472,21 +1969,12 @@
       var previous = captureState();
       previous.workouts = deepCopy(workouts);
       previous.profile = deepCopy(profile);
+      previous.badges = deepCopy(badges);
 
+      cancelResync(); // a pending session resync must not run against the data we're about to replace
       if(dayKeys.length){
-        dayKeys.forEach(function(k){
-          var importedDay = importedWorkouts[k];
-          var exercises = (Array.isArray(importedDay.exercises) ? importedDay.exercises : []).filter(isObj).map(function(ex){
-            return {
-              id: ex.id || uid(),
-              name: ex.name ? String(ex.name) : 'Exercício',
-              restSeconds: parseInt(ex.restSeconds, 10) || DEFAULT_REST,
-              sets: sanitizeSets(ex.sets)
-            };
-          });
-          workouts[k] = { name: str(importedDay.name), exercises: exercises };
-        });
-        saveJSON(LS_WORKOUTS, workouts);
+        dayKeys.forEach(function(k){ workouts[k] = nWorkouts[k]; });
+        flushWorkouts();
       }
       if(nProfile){ profile = nProfile; saveJSON(LS_PROFILE, profile); }
       if(nAttendance){ attendance = nAttendance; persistAttendance(); }
@@ -1494,15 +1982,18 @@
       if(nPRs){ prs = nPRs; persistPRs(); }
       if(nSessions){ sessions = nSessions; persistSessions(); }
       if(nPRLog){ prlog = nPRLog; persistPRLog(); }
+      if(nBadges){ badges = nBadges; persistBadges(); }
+      evaluateBadges(); // silently backfill anything the imported data already earns
 
       renderTodayStrip();
       renderDayTabs();
       renderDayPanel();
       if(document.getElementById('view-profile').classList.contains('active')) renderProfile();
       showUndoToast('Backup importado (' + parts.join('; ') + ')', function(){
-        workouts = previous.workouts; saveJSON(LS_WORKOUTS, workouts);
+        workouts = previous.workouts; flushWorkouts();
         profile = previous.profile; saveJSON(LS_PROFILE, profile);
         restoreState(previous);
+        badges = previous.badges; persistBadges();
         renderTodayStrip();
         renderDayTabs();
         renderDayPanel();
@@ -1562,7 +2053,8 @@
     });
     if(!hasData) return;
     var last = loadJSON(LS_LAST_EXPORT, null);
-    var daysSince = last ? (new Date(todayKey()+'T00:00:00') - new Date(last+'T00:00:00')) / 86400000 : Infinity;
+    if(!isValidDateKey(last)) last = null; // malformed value → treat as "never exported" (NaN would silence the nudge forever)
+    var daysSince = last ?(new Date(todayKey()+'T00:00:00') - new Date(last+'T00:00:00')) / 86400000 : Infinity;
     if(daysSince >= 7){
       setTimeout(function(){ showToast('💾 Faça um backup: Perfil → Exportar backup completo'); }, 1400);
     }
@@ -1570,7 +2062,19 @@
   maybeSuggestBackup();
 
   /* ---------- INIT ---------- */
+  normalizeLoadedState(); // validate everything read from localStorage before the first render
+  if(!ACCENTS.some(function(c){ return c.id === accentId; })) accentId = 'violet';
   applyTheme();
+  applyAccent();
+  evaluateBadges(); // silent backfill: existing history may already earn some badges
+
+  /* Another tab/window of the app wrote to storage: this tab's in-memory copy is
+     now stale and would overwrite those changes on its next save. */
+  window.addEventListener('storage', function(e){
+    if(e.key && e.key.indexOf('gymapp:') === 0 && e.key !== LS_ACCENT_COLORS){
+      showToast('Dados alterados em outra aba — recarregue a página para evitar perder alterações', 'error');
+    }
+  });
   updateOnlineStatus();
   renderTodayStrip();
   renderDayTabs();
