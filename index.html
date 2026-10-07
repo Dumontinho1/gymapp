@@ -1,7 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="theme-color" content="#7c3aed">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12,14 +14,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon.svg">
 <link rel="stylesheet" href="style.css">
-<script>
-  window.__gymappLoadStart = Date.now();
-  try{
-    var t = localStorage.getItem('gymapp:theme');
-    var theme = t ? JSON.parse(t) : 'dark';
-    document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
-  }catch(e){}
-</script>
+<script src="boot.js"></script>
 </head>
 <body>
 
@@ -67,7 +62,7 @@
         <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Salvo
       </span>
-      <button class="icon-btn" id="offlineBadge" title="Status">
+      <button class="icon-btn" id="offlineBadge" title="Status" aria-label="Status de conexão">
         <span class="dot online" id="statusDot"></span>
       </button>
     </div>
@@ -195,7 +190,23 @@
         <div class="calendar-grid" id="calendarGrid"></div>
       </div>
 
+      <div class="calendar-card heatmap-card">
+        <div class="panel-head-row">
+          <div class="panel-head">Frequência no ano</div>
+          <span class="heatmap-count" id="heatmapCount"></span>
+        </div>
+        <div class="heatmap-months" id="heatmapMonths"></div>
+        <div class="heatmap" id="heatmap"></div>
+        <div class="heatmap-legend">
+          Menos <i class="hm hm-0"></i><i class="hm hm-1"></i><i class="hm hm-2"></i><i class="hm hm-3"></i><i class="hm hm-4"></i> Mais
+        </div>
+      </div>
+
       <div class="settings-card">
+        <div class="settings-row">
+          <span>Cor de destaque</span>
+          <div class="accent-picker" id="accentPicker"></div>
+        </div>
         <div class="settings-row">
           <span>Modo escuro</span>
           <label class="switch">
@@ -245,6 +256,16 @@
       </div>
 
       <div class="panel-card">
+        <div class="panel-head">🔥 Gasto calórico estimado</div>
+        <div class="kcal-row">
+          <div class="kcal-col"><div class="compare-label">Este mês</div><div class="kcal-value" id="kcalMonth">0 kcal</div></div>
+          <div class="kcal-col"><div class="compare-label">Últimos 7 dias</div><div class="kcal-value" id="kcalWeek">0 kcal</div></div>
+          <div class="kcal-col"><div class="compare-label">Média/treino</div><div class="kcal-value" id="kcalAvg">–</div></div>
+        </div>
+        <p class="settings-hint kcal-hint" id="kcalHint"></p>
+      </div>
+
+      <div class="panel-card">
         <div class="panel-head">Volume por semana</div>
         <div class="week-bars" id="weekBars"></div>
       </div>
@@ -264,13 +285,21 @@
         <div class="pr-rank-list" id="prRankList"></div>
       </div>
 
+      <div class="panel-card">
+        <div class="panel-head-row">
+          <div class="panel-head">🏅 Conquistas</div>
+          <span class="heatmap-count" id="badgeCount"></span>
+        </div>
+        <div class="badge-grid" id="badgeGrid"></div>
+      </div>
+
       <div class="app-footer">GymApp · funciona 100% offline</div>
     </section>
 
   </main>
 
   <!-- TOAST (info / PR celebration / error / undo) -->
-  <div class="toast" id="toast">
+  <div class="toast" id="toast" role="status" aria-live="polite">
     <span class="toast-msg" id="toastMsg"></span>
     <button class="toast-undo" id="toastUndoBtn" hidden>Desfazer</button>
   </div>
@@ -294,8 +323,8 @@
 
 <!-- ADD EXERCISE MODAL -->
 <div class="modal-backdrop" id="modalBackdrop">
-  <div class="modal">
-    <h3>Novo exercício</h3>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitleNew">
+    <h3 id="modalTitleNew">Novo exercício</h3>
     <label class="field">
       <span>Nome do exercício</span>
       <input type="text" id="exNameInput" placeholder="Ex: Supino reto" maxlength="40">
@@ -313,8 +342,8 @@
 
 <!-- COPY WORKOUT MODAL -->
 <div class="modal-backdrop" id="copyModalBackdrop">
-  <div class="modal">
-    <h3>Copiar treino para...</h3>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="copyModalTitle">
+    <h3 id="copyModalTitle">Copiar treino para...</h3>
     <p class="modal-hint" id="copyModalHint">Escolha o dia de destino. O treino atual será duplicado para lá.</p>
     <div class="copy-day-list" id="copyDayList"></div>
     <div class="modal-actions">
@@ -325,7 +354,7 @@
 
 <!-- GENERIC CONFIRM MODAL (delete / overwrite actions) -->
 <div class="modal-backdrop" id="confirmModalBackdrop">
-  <div class="modal">
+  <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmModalTitle" aria-describedby="confirmModalMsg">
     <h3 id="confirmModalTitle">Confirmar</h3>
     <p class="modal-hint" id="confirmModalMsg"></p>
     <div class="modal-actions">
@@ -338,3 +367,4 @@
 <script src="app.js"></script>
 </body>
 </html>
+
