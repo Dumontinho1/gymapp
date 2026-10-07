@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="GymApp">
 <title>GymApp</title>
 <link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon.svg">
 <link rel="stylesheet" href="style.css">
 <script>
@@ -97,8 +97,6 @@
           <input type="text" id="dayNameInput" class="day-name-input" placeholder="Nome do treino (opcional)" maxlength="30">
           <button class="btn-copy-day" id="btnCopyDay" title="Copiar este treino para outro dia">⧉ Copiar</button>
         </div>
-
-        <button class="btn-live-start" id="btnLiveStart">▶ Iniciar treino ao vivo</button>
 
         <div class="exercise-list" id="exerciseList"></div>
 
@@ -271,7 +269,7 @@
 
   </main>
 
-  <!-- TOAST (info / PR celebration / undo) -->
+  <!-- TOAST (info / PR celebration / error / undo) -->
   <div class="toast" id="toast">
     <span class="toast-msg" id="toastMsg"></span>
     <button class="toast-undo" id="toastUndoBtn" hidden>Desfazer</button>
@@ -292,81 +290,6 @@
       <span>Perfil</span>
     </button>
   </nav>
-</div>
-
-<!-- LIVE WORKOUT MODE -->
-<div class="live-overlay" id="liveOverlay">
-
-  <div class="live-screen" id="liveScreenMain">
-    <div class="live-top">
-      <button class="live-close" id="liveClose" title="Encerrar treino ao vivo">✕</button>
-      <div class="live-progress-wrap">
-        <div class="live-step" id="liveStep">Exercício 1 de 1</div>
-        <div class="live-progress-bar"><div class="live-progress-fill" id="liveProgressFill"></div></div>
-      </div>
-      <div class="live-elapsed" id="liveElapsed">00:00</div>
-    </div>
-
-    <div class="live-body" id="liveBody">
-      <div class="live-exname" id="liveExName">Exercício</div>
-      <div class="live-pr" id="liveExPR" hidden></div>
-      <div class="live-last" id="liveExLast" hidden></div>
-
-      <div class="live-set-card">
-        <div class="live-set-label" id="liveSetLabel">Série 1</div>
-        <div class="live-set-fields">
-          <label class="live-field">
-            <span>Repetições</span>
-            <input type="number" inputmode="numeric" min="0" id="liveRepsInput">
-          </label>
-          <label class="live-field">
-            <span>Carga (kg)</span>
-            <input type="number" inputmode="decimal" min="0" step="0.5" id="liveLoadInput">
-          </label>
-        </div>
-        <button class="btn-live-complete" id="liveCompleteSet">✓ Concluir série</button>
-      </div>
-
-      <div class="live-nav-row">
-        <button class="live-nav-btn" id="livePrevEx">‹ Exercício anterior</button>
-        <button class="live-nav-btn" id="liveNextEx">Próximo exercício ›</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Rest banner shown between sets -->
-  <div class="live-rest-banner" id="liveRestBanner">
-    <div class="rest-ring-wrap">
-      <svg class="rest-ring" viewBox="0 0 120 120">
-        <circle class="ring-bg" cx="60" cy="60" r="52"></circle>
-        <circle class="ring-fg" id="liveRingFg" cx="60" cy="60" r="52"></circle>
-      </svg>
-      <div class="rest-time" id="liveRestTime">01:30</div>
-    </div>
-    <div class="live-rest-label">Descansando…</div>
-    <button class="btn-skip-rest" id="liveSkipRest">Pular descanso ›</button>
-  </div>
-
-  <!-- Summary shown at the end -->
-  <div class="live-summary" id="liveSummary">
-    <div class="live-summary-trophy">🏁</div>
-    <h2>Treino concluído!</h2>
-    <div class="live-summary-stats">
-      <div class="live-summary-stat">
-        <div class="lss-value" id="summaryTime">00:00</div>
-        <div class="lss-label">Duração</div>
-      </div>
-      <div class="live-summary-stat">
-        <div class="lss-value" id="summaryVolume">0 kg</div>
-        <div class="lss-label">Volume total</div>
-      </div>
-      <div class="live-summary-stat">
-        <div class="lss-value" id="summaryPRs">0</div>
-        <div class="lss-label">Recordes batidos</div>
-      </div>
-    </div>
-    <button class="btn-primary" id="liveSummaryClose">Concluir e voltar</button>
-  </div>
 </div>
 
 <!-- ADD EXERCISE MODAL -->
