@@ -1345,6 +1345,7 @@
     renderCalendar();
     renderHeatmap();
     renderAccentPicker();
+    checkOfflineReady();
   }
 
   function renderBMI(){
@@ -2030,10 +2031,35 @@
   window.addEventListener('offline', updateOnlineStatus);
 
   /* ---------- SERVICE WORKER ---------- */
+  /* updateViaCache:'none' makes the browser check sw.js itself without using its
+     HTTP cache, so a new version is noticed promptly. */
   if('serviceWorker' in navigator){
     window.addEventListener('load', function(){
-      navigator.serviceWorker.register('sw.js').catch(function(){});
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then(function(){ return navigator.serviceWorker.ready; })
+        .then(function(){ setTimeout(checkOfflineReady, 1500); })
+        .catch(function(){ checkOfflineReady(); });
     });
+  }
+
+  /* Tells you whether the app is really saved on the phone for offline use, so
+     you can confirm it at home (with Wi-Fi) instead of finding out at the gym. */
+  function checkOfflineReady(){
+    var el = document.getElementById('offlineStatus');
+    if(!el) return;
+    function show(ok, text){
+      el.textContent = text;
+      el.className = 'offline-status ' + (ok ? 'ok' : 'bad');
+    }
+    if(!('caches' in window) || !('serviceWorker' in navigator)){
+      show(false, '⚠ Este navegador não suporta uso offline');
+      return;
+    }
+    var core = ['./index.html', './style.css', './app.js', './boot.js'];
+    Promise.all(core.map(function(u){ return caches.match(u); })).then(function(found){
+      var ok = found.every(Boolean) && !!navigator.serviceWorker.controller;
+      show(ok, ok ? '✓ Pronto para uso offline' : '⚠ Ainda não disponível offline — abra o app uma vez com internet e recarregue');
+    }).catch(function(){ show(false, '⚠ Não foi possível verificar o modo offline'); });
   }
 
   /* Best-effort request that the browser NOT auto-evict this site's storage
