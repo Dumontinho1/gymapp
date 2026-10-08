@@ -672,3 +672,11 @@ input, select, textarea, button{ max-width:100%; }
 .badge-item.unlocked .badge-icon{ filter:none; opacity:1; }
 .badge-item.unlocked .badge-title{ color:var(--text); }
 .badge-item.unlocked .badge-prog{ color:var(--gold); }
+
+/* ---------- OFFLINE STATUS ---------- */
+.offline-status{ text-align:center; font-size:12px; font-weight:700; padding:4px 8px 8px; }
+.offline-status.ok{ color:var(--success); }
+.offline-status.bad{ color:var(--warn); }
+.offline-detail{ text-align:center; font-size:10.5px; color:var(--text-dim); padding:0 12px 8px; line-height:1.4; word-break:break-word; }
+.offline-actions{ display:flex; justify-content:center; padding-bottom:10px; }
+.offline-actions .btn-io[hidden]{ display:none; }

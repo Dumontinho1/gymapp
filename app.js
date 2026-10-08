@@ -2033,34 +2033,108 @@
   /* ---------- SERVICE WORKER ---------- */
   /* updateViaCache:'none' makes the browser check sw.js itself without using its
      HTTP cache, so a new version is noticed promptly. */
+  var swRegistration = null;
+  var swError = '';
   if('serviceWorker' in navigator){
     window.addEventListener('load', function(){
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
-        .then(function(){ return navigator.serviceWorker.ready; })
-        .then(function(){ setTimeout(checkOfflineReady, 1500); })
-        .catch(function(){ checkOfflineReady(); });
+        .then(function(reg){ swRegistration = reg; return navigator.serviceWorker.ready; })
+        .then(function(){ setTimeout(function(){ checkOfflineReady(true); }, 800); })
+        .catch(function(err){ swError = 'registro: ' + ((err && err.message) || err); checkOfflineReady(true); });
+      // safety net: `ready` never resolves if the worker can't install, so check regardless after a few seconds
+      setTimeout(function(){ checkOfflineReady(true); }, 5000);
+      // the worker took control of this page (first install or an update): re-check, no reload needed
+      navigator.serviceWorker.addEventListener('controllerchange', function(){ checkOfflineReady(false); });
     });
   }
 
-  /* Tells you whether the app is really saved on the phone for offline use, so
-     you can confirm it at home (with Wi-Fi) instead of finding out at the gym. */
-  function checkOfflineReady(){
+  /* ---------- OFFLINE READINESS ----------
+     The page can write to the same cache the service worker reads, so it can
+     finish (or repair) the offline copy by itself — no manual reloads, which
+     matters for a home-screen shortcut. Keep these in sync with sw.js. */
+  var OFFLINE_CACHE = 'gymapp-cache-v8';              // MUST equal CACHE in sw.js
+  var OFFLINE_CORE = ['./', './index.html', './style.css', './app.js', './boot.js', './manifest.json'];
+  var preparing = false, autoPrepareTried = false, prepareError = '';
+
+  function inspectOffline(){
+    if(!('serviceWorker' in navigator) || !('caches' in window)) return Promise.resolve({ unsupported: true });
+    return Promise.all(OFFLINE_CORE.map(function(u){
+      return caches.match(u).then(function(r){ return r ? null : u; });
+    })).then(function(missing){
+      var reg = swRegistration;
+      var state = !reg ? 'não registrado'
+        : reg.active ? 'ativo' : reg.installing ? 'instalando' : reg.waiting ? 'aguardando' : 'sem worker';
+      return {
+        missing: missing.filter(Boolean),
+        controlled: !!navigator.serviceWorker.controller,
+        state: state
+      };
+    });
+  }
+
+  /* Downloads the core files straight into the offline cache. */
+  function prepareOffline(){
+    if(preparing) return Promise.resolve();
+    preparing = true;
+    prepareError = '';
+    return caches.open(OFFLINE_CACHE).then(function(cache){
+      return Promise.all(OFFLINE_CORE.map(function(u){
+        return fetch(new Request(u, { cache: 'reload' })).then(function(res){
+          if(!res.ok) throw new Error(u + ' (HTTP ' + res.status + ')');
+          return cache.put(u, res);
+        });
+      }));
+    }).catch(function(err){
+      prepareError = (err && err.message) || String(err);
+    }).then(function(){ preparing = false; });
+  }
+
+  /* Shows whether the app is really saved on the phone for offline use. If
+     files are missing and we're online it fixes that automatically (once per
+     launch); otherwise it shows exactly what's wrong. */
+  function checkOfflineReady(autoRepair){
     var el = document.getElementById('offlineStatus');
+    var detailEl = document.getElementById('offlineDetail');
+    var btn = document.getElementById('btnPrepareOffline');
     if(!el) return;
-    function show(ok, text){
+    function show(ok, text, detail, showBtn){
       el.textContent = text;
       el.className = 'offline-status ' + (ok ? 'ok' : 'bad');
+      detailEl.textContent = detail || '';
+      detailEl.hidden = !detail;
+      btn.hidden = !showBtn;
     }
-    if(!('caches' in window) || !('serviceWorker' in navigator)){
-      show(false, '⚠ Este navegador não suporta uso offline');
-      return;
-    }
-    var core = ['./index.html', './style.css', './app.js', './boot.js'];
-    Promise.all(core.map(function(u){ return caches.match(u); })).then(function(found){
-      var ok = found.every(Boolean) && !!navigator.serviceWorker.controller;
-      show(ok, ok ? '✓ Pronto para uso offline' : '⚠ Ainda não disponível offline — abra o app uma vez com internet e recarregue');
-    }).catch(function(){ show(false, '⚠ Não foi possível verificar o modo offline'); });
+    inspectOffline().then(function(info){
+      if(info.unsupported){ show(false, '⚠ Este navegador não suporta uso offline', '', false); return; }
+      if(!info.missing.length && info.controlled){ show(true, '✓ Pronto para uso offline', '', false); return; }
+
+      if(info.missing.length && autoRepair && !autoPrepareTried && navigator.onLine){
+        autoPrepareTried = true;
+        show(false, '⏳ Preparando uso offline…', '', false);
+        prepareOffline().then(function(){ checkOfflineReady(false); });
+        return;
+      }
+
+      var parts = ['Service worker: ' + info.state, 'controlando: ' + (info.controlled ? 'sim' : 'não')];
+      if(info.missing.length) parts.push('faltando: ' + info.missing.join(', '));
+      if(swError) parts.push(swError);
+      if(prepareError) parts.push('erro: ' + prepareError);
+      var msg = (!info.missing.length && !info.controlled)
+        ? '⚠ Quase pronto — feche o app por completo e abra de novo'
+        : '⚠ Uso offline ainda não está pronto';
+      show(false, msg, parts.join(' · '), true);
+    }).catch(function(){ show(false, '⚠ Não foi possível verificar o modo offline', '', true); });
   }
+
+  document.getElementById('btnPrepareOffline').addEventListener('click', function(){
+    var b = this;
+    b.disabled = true;
+    prepareOffline().then(function(){
+      b.disabled = false;
+      if(swRegistration && swRegistration.update) swRegistration.update().catch(function(){});
+      checkOfflineReady(false);
+    });
+  });
 
   /* Best-effort request that the browser NOT auto-evict this site's storage
      under space pressure. Doesn't protect against the user (or the phone's
