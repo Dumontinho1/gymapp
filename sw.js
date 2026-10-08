@@ -28,16 +28,16 @@ function keyFor(url) {
   return new Request(url.origin + url.pathname);
 }
 
+/* The worker ALWAYS installs and activates (so the app is always controlled and
+   can serve/repair itself), even if some downloads fail. What protects you is
+   the rule in `activate`: older caches are only deleted once this cache holds
+   every CORE file. Missing files are filled in later — by the fetch handler
+   at runtime and by the page's own "prepare offline" step. */
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
     // cache: 'reload' bypasses the browser HTTP cache, so we never store a stale copy
-    await Promise.all(CORE.map(async (url) => {
-      const res = await fetchWithTimeout(new Request(url, { cache: 'reload' }), INSTALL_TIMEOUT);
-      if (!res.ok) throw new Error('precache failed: ' + url + ' (' + res.status + ')');
-      await cache.put(url, res);
-    }));
-    await Promise.all(OPTIONAL.map((url) =>
+    await Promise.all(CORE.concat(OPTIONAL).map((url) =>
       fetchWithTimeout(new Request(url, { cache: 'reload' }), INSTALL_TIMEOUT)
         .then((res) => (res.ok ? cache.put(url, res) : null))
         .catch(() => {})
@@ -46,14 +46,20 @@ self.addEventListener('install', (event) => {
   })());
 });
 
-/* Runs only after a SUCCESSFUL install, so old caches are removed only once the
-   new one is known to be complete. */
+async function cacheIsComplete(cache) {
+  const found = await Promise.all(CORE.map((url) => cache.match(url)));
+  return found.every(Boolean);
+}
+
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(
-      keys.filter((k) => k.startsWith('gymapp-cache-') && k !== CACHE).map((k) => caches.delete(k))
-    );
+    const cache = await caches.open(CACHE);
+    if (await cacheIsComplete(cache)) {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys.filter((k) => k.startsWith('gymapp-cache-') && k !== CACHE).map((k) => caches.delete(k))
+      );
+    }
     await self.clients.claim();
   })());
 });
