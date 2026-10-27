@@ -230,6 +230,17 @@ export function pontuar(l, refPorCategoria) {
 // ---------------------------------------------------------------- mensagens
 const fmtNota = (r) => (r ? r.toFixed(1).replace('.', ',') : '–');
 
+/* Para quem não tem site: dois produtos separados, cada um com seu preço. */
+function doisServicos(loja) {
+  return `São dois serviços independentes, você pode escolher só um ou os dois:
+
+1️⃣ *Avaliações no Google:* mais avaliações 5★ de forma automática e dentro das regras do Google. Quem tem mais avaliações aparece primeiro quando alguém procura "perto de mim". Teste grátis de 30 dias, depois R$ 39/mês.
+
+2️⃣ *Site profissional:* uma página da ${loja} com WhatsApp, endereço, horários e fotos. R$ 300 (ou 3x de R$ 100).
+
+Posso te mandar uma imagem de como funciona?`;
+}
+
 export function mensagens(l, ref, nome, cidade) {
   const abertura = nome ? `Olá! Aqui é ${nome}.` : 'Olá, tudo bem?';
   const n = l.userRatingCount || 0;
@@ -243,13 +254,9 @@ export function mensagens(l, ref, nome, cidade) {
 Pergunto porque estou ajudando negócios da região a receber mais avaliações 5★ de forma automática e dentro das regras do Google. Quem tem mais avaliações aparece primeiro quando alguém procura "perto de mim".
 
 Estou com vagas para um teste grátis de 30 dias, sem compromisso. Posso te mandar uma imagem de como funciona?`
-: `${abertura} Vi a ${l.nome}${onde} e queria te fazer uma pergunta rápida: vocês costumam pedir para os clientes avaliarem no Google?
+: `${abertura} Vi a ${l.nome}${onde} e queria te apresentar rapidinho como ajudo negócios da região a serem mais encontrados na internet.
 
-Pergunto porque ajudo negócios da região a serem mais encontrados na internet:
-⭐ mais avaliações 5★ no Google, de forma automática e dentro das regras (quem tem mais aparece primeiro no "perto de mim");
-🌐 e, para quem ainda não tem, um site simples e profissional, com WhatsApp, endereço, horários e fotos.
-
-Estou com vagas para um teste grátis de 30 dias das avaliações, sem compromisso. Posso te mandar uma imagem de como funciona?`;
+${doisServicos(l.nome)}`;
     return { primeira, followup };
   }
   let gancho;
@@ -260,15 +267,15 @@ Estou com vagas para um teste grátis de 30 dias das avaliações, sem compromis
   } else {
     gancho = `vi a ${l.nome} no Google Maps: nota ${fmtNota(l.rating)} com ${n} avaliações`;
   }
-  const site = l.site ? '' : `
+  const primeira = l.site
+? `${abertura} ${gancho.charAt(0).toUpperCase() + gancho.slice(1)}.
 
-Vi também que vocês ainda não têm site. Eu monto um site simples e profissional (WhatsApp, endereço, horários e fotos), se tiver interesse.`;
-  const primeira =
-`${abertura} ${gancho.charAt(0).toUpperCase() + gancho.slice(1)}.
+Estou ajudando negócios aqui da região a receber mais avaliações 5★ no Google, de forma automática e dentro das regras do Google. O cliente recebe um lembrete simples depois do atendimento e avalia em 30 segundos.
 
-Estou ajudando negócios aqui da região a receber mais avaliações 5★ no Google, de forma automática e dentro das regras do Google. O cliente recebe um lembrete simples depois do atendimento e avalia em 30 segundos.${site}
+Estou com vagas para um teste grátis de 30 dias, sem compromisso. Posso te mandar uma imagem de como funciona?`
+: `${abertura} ${gancho.charAt(0).toUpperCase() + gancho.slice(1)}. Vi também que vocês ainda não têm site.
 
-Estou com vagas para um teste grátis de 30 dias das avaliações, sem compromisso. Posso te mandar uma imagem de como funciona?`;
+${doisServicos(l.nome)}`;
 
   return { primeira, followup };
 }
@@ -343,7 +350,9 @@ function salvar(leads, dir, meta, lugares) {
   const imagens = [['como-funciona.png', 'Como funciona'], ['display-balcao.png', 'Display de balcão']]
     .filter(([f]) => existsSync(join(HERE, 'imagens', f)))
     .map(([f, titulo]) => ({ arquivo: f, titulo, dataUrl: 'data:image/png;base64,' + readFileSync(join(HERE, 'imagens', f)).toString('base64') }));
-  const data = JSON.stringify({ meta, leads, imagens }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+  let respostas = [];
+  try { respostas = JSON.parse(readFileSync(join(HERE, 'respostas.json'), 'utf8')).respostas || []; } catch (e) { console.warn('respostas.json inválido:', e.message); }
+  const data = JSON.stringify({ meta, leads, imagens, respostas }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   writeFileSync(join(dir, 'leads.html'), template.replace('/*__DADOS__*/{}', () => data));
 }
 

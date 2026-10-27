@@ -59,11 +59,12 @@ test('oferta de site só para quem não tem site; sem site ganha +10 pontos', ()
   ]);
   const [a, b] = processar(lugares, 'Vinicius', 'Belo Horizonte');
   const com = [a, b].find((x) => x.nome === 'Com Site'), sem = [a, b].find((x) => x.nome === 'Sem Site');
-  assert.doesNotMatch(com.mensagem, /site simples/);
-  assert.match(sem.mensagem, /site simples e profissional/);
+  assert.doesNotMatch(com.mensagem, /Site profissional/);
+  assert.match(sem.mensagem, /dois serviços independentes/);
+  assert.match(sem.mensagem, /1️⃣ \*Avaliações no Google:\*[\s\S]*2️⃣ \*Site profissional:\* uma página da Sem Site[\s\S]*R\$ 300 \(ou 3x de R\$ 100\)/);
   assert.equal(sem.score - com.score, 10);
   assert.ok(sem.motivos.includes('sem site (oferecer site)'));
   // versão com nota (Google/planilha)
   const g = processar(csvParaLugares(lerCSV('name,phone,rating,reviews,type\nLoja X,+55 31 98888-0000,4.2,15,Pet shop\n')), 'Vinicius', 'BH');
-  assert.match(g[0].mensagem, /Vi também que vocês ainda não têm site/);
+  assert.match(g[0].mensagem, /nota 4,2 com 15 avaliações\. Vi também que vocês ainda não têm site\.[\s\S]*dois serviços independentes/);
 });

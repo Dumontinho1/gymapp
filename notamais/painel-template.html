@@ -9,6 +9,7 @@
   :root{ --bg:#0b0f16; --card:#141a26; --card2:#1b2232; --line:rgba(255,255,255,.09); --txt:#eef1f8; --dim:#8c94a8;
          --acc:#22c55e; --acc2:#16a34a; --gold:#fbbf24; --red:#f43f5e; --blue:#38bdf8; }
   *{ box-sizing:border-box; }
+  [hidden]{ display:none !important; }
   body{ margin:0; background:var(--bg); color:var(--txt); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; }
   header{ position:sticky; top:0; z-index:5; background:rgba(11,15,22,.94); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); padding:12px 16px; }
   h1{ font-size:17px; margin:0 0 2px; }
@@ -51,6 +52,14 @@
   .btn.img{ background:#38bdf8; color:#04202e; }
   .toast{ position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#111827; color:#fff; border:1px solid var(--line); padding:10px 14px; border-radius:10px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:9; max-width:92vw; text-align:center; }
   .toast.show{ opacity:1; }
+  details.resp{ margin-top:10px; background:var(--card2); border:1px solid var(--line); border-radius:12px; }
+  details.resp > summary{ cursor:pointer; padding:10px 12px; font-weight:700; font-size:13px; list-style:none; }
+  details.resp > summary::-webkit-details-marker{ display:none; }
+  details.resp[open] > summary{ border-bottom:1px solid var(--line); }
+  .respbody{ padding:10px 12px 12px; }
+  .respbody select{ width:100%; background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:10px; padding:9px; font-size:13px; }
+  .respbody textarea{ min-height:150px; background:var(--card); }
+  .imgnote{ font-size:12px; color:#38bdf8; margin-top:6px; }
   .hint{ background:var(--card2); border:1px dashed var(--line); border-radius:12px; padding:10px 12px; color:var(--dim); font-size:12.5px; }
 </style>
 </head>
@@ -83,6 +92,63 @@
   var LEADS = Array.isArray(DATA.leads) ? DATA.leads : [];
   var META = DATA.meta || {};
   // só aceita PNG embutido pelo próprio robô
+  var RESPOSTAS = (Array.isArray(DATA.respostas) ? DATA.respostas : []).filter(function(r){ return r && typeof r.texto === 'string' && typeof r.titulo === 'string'; });
+  function fimTeste(){ var d = new Date(); d.setDate(d.getDate() + 30); return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + d.getFullYear(); }
+  function preencher(texto, l){
+    return texto.replace(/\{loja\}/g, l.nome).replace(/\{nome\}/g, META.nome || '').replace(/\{fimTeste\}/g, fimTeste());
+  }
+  function waTexto(l, texto){ return 'https://wa.me/' + l.telefone.e164 + '?text=' + encodeURIComponent(texto); }
+
+  /* Bloco "Respostas prontas" de uma loja (montado só quando aberto). */
+  function blocoRespostas(l, s){
+    var det = el('details', 'resp');
+    det.appendChild(el('summary', null, '💬 Respostas prontas (' + RESPOSTAS.length + ')'));
+    var montado = false;
+    det.addEventListener('toggle', function(){
+      if(!det.open || montado) return;
+      montado = true;
+      var body = el('div', 'respbody');
+      var sel = el('select'); sel.setAttribute('aria-label', 'Escolha a resposta');
+      var grupos = {};
+      RESPOSTAS.forEach(function(r, i){
+        var g = r.grupo || 'Outras';
+        if(!grupos[g]){ grupos[g] = document.createElement('optgroup'); grupos[g].label = g; sel.appendChild(grupos[g]); }
+        grupos[g].appendChild(new Option(r.titulo, String(i)));
+      });
+      var ta = el('textarea'); ta.setAttribute('aria-label', 'Texto da resposta (pode editar)');
+      var note = el('div', 'imgnote');
+      var row = el('div', 'row');
+      var env = el('a', 'btn wa', '💬 Enviar no WhatsApp'); env.target = '_blank'; env.rel = 'noopener noreferrer';
+      var cop = el('button', 'btn ghost', '⧉ Copiar'); cop.type = 'button';
+      var img = el('button', 'btn img', ehCelular ? '🖼️ Enviar imagem' : '🖼️ Copiar imagem'); img.type = 'button';
+      function atual(){ return RESPOSTAS[parseInt(sel.value, 10)] || RESPOSTAS[0]; }
+      function atualizar(){
+        var r = atual();
+        ta.value = preencher(r.texto, l);
+        env.href = waTexto(l, ta.value);
+        var temImg = typeof r.imagem === 'number' && IMAGENS[r.imagem];
+        img.hidden = !temImg;
+        note.textContent = temImg ? '📎 Mande junto a imagem "' + IMAGENS[r.imagem].titulo + '" (botão azul).' : '';
+      }
+      sel.addEventListener('change', atualizar);
+      ta.addEventListener('input', function(){ env.href = waTexto(l, ta.value); });
+      env.addEventListener('click', function(){
+        var r = atual();
+        // registra o andamento: quem recebe resposta já respondeu
+        if(s.status === 'novo' || s.status === 'enviado' || s.status === 'followup') { s.status = /Follow-up/.test(r.titulo) ? 'followup' : 'respondeu'; save(); setTimeout(refresh, 300); }
+      });
+      cop.addEventListener('click', function(){
+        (navigator.clipboard ? navigator.clipboard.writeText(ta.value) : Promise.reject()).then(function(){ toast('Resposta copiada'); }, function(){ prompt('Copie a resposta:', ta.value); });
+      });
+      img.addEventListener('click', function(){ var r = atual(); if(typeof r.imagem === 'number' && IMAGENS[r.imagem]) anexar(IMAGENS[r.imagem]); });
+      row.appendChild(env); row.appendChild(img); row.appendChild(cop);
+      body.appendChild(sel); body.appendChild(ta); body.appendChild(note); body.appendChild(row);
+      det.appendChild(body);
+      atualizar();
+    });
+    return det;
+  }
+
   var IMAGENS = (Array.isArray(DATA.imagens) ? DATA.imagens : []).filter(function(i){ return i && /^data:image\/png;base64,[A-Za-z0-9+\/=]+$/.test(i.dataUrl || ''); });
 
   var toastTimer = null;
@@ -245,6 +311,7 @@
       }
       card.appendChild(row);
 
+      if(RESPOSTAS.length) card.appendChild(blocoRespostas(l, s));
       var ta = el('textarea'); ta.placeholder = 'Anotações (nome do dono, melhor horário, objeções…)'; ta.value = s.nota || '';
       ta.addEventListener('input', function(){ s.nota = ta.value; save(); });
       card.appendChild(ta);

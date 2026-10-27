@@ -40,7 +40,7 @@ O Google **permite e incentiva** pedir avaliações. O que é **proibido** (e po
 
 ## 4. A oferta
 
-> **Serviço complementar: site simples** para quem ainda não tem. Os preços e o combo "Presença Digital" (site + avaliações por R$ 79/mês) estão em `MENSAGENS.md`, seção 7. O robô identifica quem não tem site e já inclui essa oferta na 1ª mensagem.
+> **Serviço complementar: site simples** para quem ainda não tem. Preços: site R$ 300 (ou 3× R$ 100), hospedagem e manutenção opcional R$ 50/mês, promoção site + avaliações R$ 79/mês. Detalhes em `MENSAGENS.md`, seção 7. O robô identifica quem não tem site e já inclui essa oferta na 1ª mensagem.
 
 | | Valor | Observação |
 |---|---|---|
