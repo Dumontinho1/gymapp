@@ -42,6 +42,15 @@
   .empty{ text-align:center; color:var(--dim); padding:40px 10px; }
   a.lnk{ color:var(--blue); font-size:12.5px; }
   @media (max-width:640px){ header{ position:static; } }
+  .imgs{ display:flex; gap:10px; margin:10px 0 2px; overflow-x:auto; }
+  .imgcard{ flex:none; display:flex; gap:10px; align-items:center; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:8px; }
+  .imgcard img{ width:46px; height:58px; object-fit:cover; border-radius:6px; }
+  .imgcard .t{ font-size:12px; font-weight:700; margin-bottom:4px; }
+  .imgcard .b{ display:flex; gap:6px; }
+  .mini{ border:none; border-radius:8px; padding:6px 9px; font-size:12px; font-weight:700; cursor:pointer; background:var(--card2); color:var(--txt); border:1px solid var(--line); }
+  .btn.img{ background:#38bdf8; color:#04202e; }
+  .toast{ position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#111827; color:#fff; border:1px solid var(--line); padding:10px 14px; border-radius:10px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:9; max-width:92vw; text-align:center; }
+  .toast.show{ opacity:1; }
   .hint{ background:var(--card2); border:1px dashed var(--line); border-radius:12px; padding:10px 12px; color:var(--dim); font-size:12.5px; }
 </style>
 </head>
@@ -50,6 +59,7 @@
   <h1>🎯 NotaMais · Prospecção</h1>
   <div class="sub" id="sub"></div>
   <div class="stats" id="stats"></div>
+  <div class="imgs" id="imgs"></div>
   <div class="filters">
     <input type="search" id="q" placeholder="Buscar nome ou endereço…" aria-label="Buscar">
     <select id="fStatus" aria-label="Status"></select>
@@ -63,6 +73,7 @@
   </div>
 </header>
 <main id="list"></main>
+<div class="toast" id="toast" role="status"></div>
 
 <script type="application/json" id="dados">/*__DADOS__*/{}</script>
 <script>
@@ -71,6 +82,57 @@
   var DATA = JSON.parse(document.getElementById('dados').textContent || '{}');
   var LEADS = Array.isArray(DATA.leads) ? DATA.leads : [];
   var META = DATA.meta || {};
+  // só aceita PNG embutido pelo próprio robô
+  var IMAGENS = (Array.isArray(DATA.imagens) ? DATA.imagens : []).filter(function(i){ return i && /^data:image\/png;base64,[A-Za-z0-9+\/=]+$/.test(i.dataUrl || ''); });
+
+  var toastTimer = null;
+  function toast(msg){
+    var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 3500);
+  }
+  function blobDe(img){ return fetch(img.dataUrl).then(function(r){ return r.blob(); }); }
+  function podeCompartilhar(){
+    try{ return !!(navigator.canShare && navigator.canShare({ files: [new File([new Blob(['x'], { type:'image/png' })], 'x.png', { type:'image/png' })] })); }catch(e){ return false; }
+  }
+  var ehCelular = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  function compartilhar(img){
+    return blobDe(img).then(function(b){
+      return navigator.share({ files: [new File([b], img.arquivo, { type:'image/png' })] });
+    }).then(function(){ toast('Escolha o WhatsApp e a conversa (ela fica no topo da lista).'); }, function(e){ if(!e || e.name !== 'AbortError') baixar(img); });
+  }
+  function copiar(img){
+    if(!window.ClipboardItem || !navigator.clipboard || !navigator.clipboard.write){ baixar(img); return; }
+    // o Promise dentro do ClipboardItem mantém o "gesto do usuário" no Safari
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': blobDe(img) })]).then(function(){
+      toast('Imagem copiada! Na conversa do WhatsApp Web/Desktop, aperte Ctrl+V (Cmd+V no Mac).');
+    }, function(){ baixar(img); });
+  }
+  function baixar(img){
+    var a = document.createElement('a'); a.href = img.dataUrl; a.download = img.arquivo; document.body.appendChild(a); a.click(); a.remove();
+    toast('Imagem baixada: anexe pelo clipe 📎 na conversa do WhatsApp.');
+  }
+  /* Celular: compartilhar; computador: copiar (Ctrl+V); sem suporte: baixar. */
+  function anexar(img){
+    if(ehCelular && podeCompartilhar()) return compartilhar(img);
+    if(!ehCelular) return copiar(img);
+    baixar(img);
+  }
+
+  (function renderImgs(){
+    var box = document.getElementById('imgs');
+    IMAGENS.forEach(function(img){
+      var c = el('div', 'imgcard');
+      var th = el('img'); th.src = img.dataUrl; th.alt = img.titulo; c.appendChild(th);
+      var right = el('div'); right.appendChild(el('div', 't', img.titulo));
+      var b = el('div', 'b');
+      var a1 = el('button', 'mini', ehCelular ? '📤 Compartilhar' : '⧉ Copiar'); a1.type = 'button';
+      a1.addEventListener('click', function(){ anexar(img); });
+      var a2 = el('button', 'mini', '⬇ Baixar'); a2.type = 'button';
+      a2.addEventListener('click', function(){ baixar(img); });
+      b.appendChild(a1); b.appendChild(a2); right.appendChild(b); c.appendChild(right);
+      box.appendChild(c);
+    });
+  })();
   var FOLLOWUP_DIAS = 3;
   var STATUS = [
     ['novo', '⚪ Novo'], ['enviado', '📤 Mensagem enviada'], ['followup', '🔁 Follow-up enviado'],
@@ -124,7 +186,7 @@
     if(!LEADS.length) list.appendChild(el('div', 'empty', 'Nenhum lead. Rode o robô de novo com outra cidade ou categorias.'));
     else if(!shown.length) list.appendChild(el('div', 'empty', 'Nada com esses filtros.'));
     else if(fs === '' && min >= 70) {
-      list.appendChild(el('div', 'hint', 'Comece pelos de cima (maior pontuação). Meta sugerida: 20 a 30 mensagens novas por dia, sempre uma de cada vez. Toque em “Enviar no WhatsApp”, confira a mensagem, anexe a imagem e envie.'));
+      list.appendChild(el('div', 'hint', 'Comece pelos de cima. Para cada loja: 1) “Enviar no WhatsApp” abre a conversa com a mensagem: envie. 2) Volte aqui e toque em “Enviar imagem” (celular: escolha o WhatsApp e a conversa no topo) ou “Copiar imagem” (computador: Ctrl+V na conversa). Uma loja por vez.'));
     }
 
     shown.slice(0, 300).forEach(function(l){
@@ -162,6 +224,12 @@
         fu.href = l.whatsappFollowup; fu.target = '_blank'; fu.rel = 'noopener noreferrer';
         fu.addEventListener('click', function(){ s.status = 'followup'; save(); setTimeout(refresh, 300); });
         row.appendChild(fu);
+      }
+      if(IMAGENS.length){
+        var im = el('button', 'btn img', ehCelular ? '🖼️ Enviar imagem' : '🖼️ Copiar imagem'); im.type = 'button';
+        im.title = 'Depois de abrir a conversa, anexe a imagem "Como funciona"';
+        im.addEventListener('click', function(){ anexar(IMAGENS[0]); });
+        row.appendChild(im);
       }
       var cp = el('button', 'btn ghost', '⧉ Copiar mensagem'); cp.type = 'button';
       cp.addEventListener('click', function(){

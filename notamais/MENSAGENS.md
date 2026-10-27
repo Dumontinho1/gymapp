@@ -88,3 +88,57 @@ Se não responderem ao follow-up, marque como encerrado. Você pode tentar de no
 ## 6. Final do teste (dia 25)
 > Oi [Nome]! O teste da [Loja] acaba em 5 dias. Resultado até agora: **+[X] avaliações** (de [A] para [B]) e nota **[N]** ⭐
 > Para continuar são R$ 39 por mês (preço de fundador, fixo para sempre). Posso te mandar o link de pagamento? Se preferir parar, sem problema, e o QR code continua funcionando para você.
+
+---
+
+## 7. Serviço de site (para quem ainda não tem)
+
+> O robô verifica se a loja tem site. **Quem não tem** recebe a 1ª mensagem com as duas ofertas (avaliações + site) e ganha +10 pontos no painel. **Quem já tem** recebe só a de avaliações. Assim a mensagem continua curta e com **uma única pergunta** no final.
+
+### Preços sugeridos (ajuste como quiser)
+| Pacote | Valor | O que inclui |
+|---|---|---|
+| **Site Essencial** | R$ 397 à vista ou 3× R$ 139 | Página única: fotos, serviços, horários, mapa, botão de WhatsApp e link de avaliação do Google. Pronto em até 7 dias. |
+| Hospedagem e manutenção | R$ 29/mês | Site no ar, até 1 alteração simples por mês (preços, horários, fotos). O domínio .com.br (cerca de R$ 40/ano) é pago à parte, no nome do cliente. |
+| **Combo Presença Digital** | **R$ 79/mês** (mínimo de 6 meses) | Site Essencial **sem custo de criação** + hospedagem + avaliações no Google (kit, resumo semanal). |
+
+O combo é o mais fácil de vender: troca um valor de entrada de R$ 397 por uma mensalidade, e você ganha receita recorrente.
+
+### 1ª mensagem: versão com site (o robô usa quando a loja não tem site)
+> Olá! Aqui é Vinicius. Vi a **[Loja]** aqui em Belo Horizonte e queria te fazer uma pergunta rápida: vocês costumam pedir para os clientes avaliarem no Google?
+>
+> Pergunto porque ajudo negócios da região a serem mais encontrados na internet:
+> ⭐ mais avaliações 5★ no Google, de forma automática e dentro das regras (quem tem mais aparece primeiro no "perto de mim");
+> 🌐 e, para quem ainda não tem, um site simples e profissional, com WhatsApp, endereço, horários e fotos.
+>
+> Estou com vagas para um teste grátis de 30 dias das avaliações, sem compromisso. Posso te mandar uma imagem de como funciona?
+
+### Quando perguntarem sobre o site
+> O site é uma página profissional da [Loja] com fotos, serviços, horários, mapa e um botão que abre o WhatsApp de vocês direto. Funciona no celular, que é de onde vem quase todo cliente hoje, e ajuda a aparecer no Google.
+>
+> Fica pronto em até 7 dias. Para criar, só preciso de umas fotos, a lista de serviços (com preços, se quiserem mostrar) e os horários.
+>
+> Tenho duas opções:
+> 1️⃣ **Site sozinho:** R$ 397 (ou 3× R$ 139) + R$ 29/mês de hospedagem e manutenção
+> 2️⃣ **Combo:** site + avaliações no Google por **R$ 79/mês**, **sem pagar a criação do site** (mínimo de 6 meses)
+>
+> Se quiser, faço uma prévia rápida da página inicial, sem compromisso, para você ver como ficaria. 😉
+
+### Objeções sobre o site
+**"Já tenho Instagram, não preciso de site."**
+> O Instagram é ótimo, e o site não substitui, ele complementa: quem procura no Google ("[serviço] perto de mim") cai no site, que mostra tudo em um lugar e leva direto para o WhatsApp. Além disso, o site fica no seu nome e não depende do algoritmo do Instagram.
+
+**"Está caro." / "Não tenho esse valor agora."**
+> Entendo! Por isso existe o combo: você não paga a criação, só R$ 79 por mês já com as avaliações do Google incluídas. Se 1 ou 2 clientes novos por mês vierem pela internet, já se pagou.
+
+**"Quem cuida se precisar mudar algo?"**
+> Eu cuido. A manutenção inclui 1 alteração simples por mês (preços, horários, fotos), é só me mandar no WhatsApp.
+
+**"O site fica meu?"**
+> O domínio (o endereço do site) é registrado no **seu** nome. Se um dia você quiser sair, te entrego tudo.
+
+### Fluxo com o seu chat de criar sites
+1. Quando o cliente aceitar, peça: **fotos** (fachada, ambiente, trabalhos), **lista de serviços e preços**, **horários**, **endereço**, **WhatsApp** e **Instagram**.
+2. Gere o site no seu outro chat e coloque o **link de avaliação do Google** (o `kit-cliente.mjs` gera esse link) e o botão de WhatsApp.
+3. Mande a prévia para aprovação, publique e envie o link.
+4. **Dica de venda:** a "prévia grátis da página inicial" convence muito, porque o dono vê o negócio dele pronto. Faça só da página inicial, para não perder tempo com quem não fecha.

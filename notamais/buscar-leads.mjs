@@ -169,7 +169,9 @@ export function csvParaLugares(linhas) {
       categoria: (col(o, 'category', 'categoryname', 'type', 'subtypes', 'categoria').split(',')[0] || 'negócio local').toLowerCase(),
       nationalPhoneNumber: melhorTelefone(col(o, 'phone', 'phoneunformatted', 'phone_1', 'telefone')),
       formattedAddress: col(o, 'full_address', 'address', 'endereço', 'endereco'),
-      rating, userRatingCount: count === undefined && rating !== undefined ? 0 : count,
+      // sem nota = sem dados de avaliação (o Google omite a nota quando não há avaliações)
+      rating, userRatingCount: rating === undefined ? undefined : (count ?? 0),
+      websiteUri: col(o, 'site', 'website', 'site_url', 'websiteuri'),
       googleMapsUri: /^https:\/\/(www\.)?(maps\.)?google\./.test(col(o, 'location_link', 'url')) ? col(o, 'location_link', 'url') : '',
       businessStatus: status === 'OPERATIONAL' || !status ? 'OPERATIONAL' : status,
     };
@@ -201,10 +203,13 @@ export function pontuar(l, refPorCategoria) {
 
   // Fonte sem nota/avaliações (OpenStreetMap): prioriza pelo celular e pede
   // para conferir o perfil no Maps antes de enviar.
+  const semSite = !l.site;
+  if (semSite) motivos.push('sem site (oferecer site)');
   if (l.semAvaliacoes) {
     motivos.push('confira as avaliações no Maps antes de enviar');
-    return { score: l.telefone?.celular ? 70 : 35, motivos };
+    return { score: (l.telefone?.celular ? 70 : 35) + (semSite ? 10 : 0), motivos };
   }
+  if (semSite) s += 10;
 
   if (n === 0) { s += 5; motivos.push('nenhuma avaliação'); }
   else if (n <= 20) { s += 30; motivos.push('poucas avaliações'); }
@@ -232,12 +237,19 @@ export function mensagens(l, ref, nome, cidade) {
 `Oi! Passando só pra saber se você viu minha mensagem sobre as avaliações da ${l.nome} no Google 🙂 Se não fizer sentido agora, sem problema, é só me avisar que eu não mando mais.`;
   if (l.semAvaliacoes) {
     const onde = cidade ? ` aqui em ${String(cidade).split(',')[0].trim()}` : '';
-    const primeira =
-`${abertura} Vi a ${l.nome}${onde} e queria te fazer uma pergunta rápida: vocês costumam pedir para os clientes avaliarem no Google?
+    const primeira = l.site
+? `${abertura} Vi a ${l.nome}${onde} e queria te fazer uma pergunta rápida: vocês costumam pedir para os clientes avaliarem no Google?
 
 Pergunto porque estou ajudando negócios da região a receber mais avaliações 5★ de forma automática e dentro das regras do Google. Quem tem mais avaliações aparece primeiro quando alguém procura "perto de mim".
 
-Estou com vagas para um teste grátis de 30 dias, sem compromisso. Posso te mandar uma imagem de como funciona?`;
+Estou com vagas para um teste grátis de 30 dias, sem compromisso. Posso te mandar uma imagem de como funciona?`
+: `${abertura} Vi a ${l.nome}${onde} e queria te fazer uma pergunta rápida: vocês costumam pedir para os clientes avaliarem no Google?
+
+Pergunto porque ajudo negócios da região a serem mais encontrados na internet:
+⭐ mais avaliações 5★ no Google, de forma automática e dentro das regras (quem tem mais aparece primeiro no "perto de mim");
+🌐 e, para quem ainda não tem, um site simples e profissional, com WhatsApp, endereço, horários e fotos.
+
+Estou com vagas para um teste grátis de 30 dias das avaliações, sem compromisso. Posso te mandar uma imagem de como funciona?`;
     return { primeira, followup };
   }
   let gancho;
@@ -248,12 +260,15 @@ Estou com vagas para um teste grátis de 30 dias, sem compromisso. Posso te mand
   } else {
     gancho = `vi a ${l.nome} no Google Maps: nota ${fmtNota(l.rating)} com ${n} avaliações`;
   }
+  const site = l.site ? '' : `
+
+Vi também que vocês ainda não têm site. Eu monto um site simples e profissional (WhatsApp, endereço, horários e fotos), se tiver interesse.`;
   const primeira =
 `${abertura} ${gancho.charAt(0).toUpperCase() + gancho.slice(1)}.
 
-Estou ajudando negócios aqui da região a receber mais avaliações 5★ no Google, de forma automática e dentro das regras do Google. O cliente recebe um lembrete simples depois do atendimento e avalia em 30 segundos.
+Estou ajudando negócios aqui da região a receber mais avaliações 5★ no Google, de forma automática e dentro das regras do Google. O cliente recebe um lembrete simples depois do atendimento e avalia em 30 segundos.${site}
 
-Estou com vagas para um teste grátis de 30 dias, sem compromisso. Posso te mandar uma imagem de como funciona?`;
+Estou com vagas para um teste grátis de 30 dias das avaliações, sem compromisso. Posso te mandar uma imagem de como funciona?`;
 
   return { primeira, followup };
 }
@@ -311,18 +326,24 @@ export function processar(lugares, nome, cidade) {
     .sort((a, b) => b.score - a.score || a.userRatingCount - b.userRatingCount);
 }
 
-function salvar(leads, dir, meta) {
+function salvar(leads, dir, meta, lugares) {
   mkdirSync(dir, { recursive: true });
-  const cols = ['score', 'nome', 'categoria', 'rating', 'userRatingCount', 'telefoneTexto', 'endereco', 'motivos', 'maps', 'whatsapp'];
-  const head = ['pontuação', 'nome', 'categoria', 'nota', 'avaliações', 'telefone', 'endereço', 'por que', 'google maps', 'link whatsapp'];
+  // dados brutos: permitem regerar o painel/mensagens sem buscar de novo (--reusar)
+  if (lugares) writeFileSync(join(dir, 'lugares.json'), JSON.stringify({ cidade: meta.cidade, geradoEm: meta.geradoEm, lugares }));
+  const cols = ['score', 'nome', 'categoria', 'rating', 'userRatingCount', 'telefoneTexto', 'endereco', 'site', 'motivos', 'maps', 'whatsapp'];
+  const head = ['pontuação', 'nome', 'categoria', 'nota', 'avaliações', 'telefone', 'endereço', 'site', 'por que', 'google maps', 'link whatsapp'];
   const csv = [head.map(csvCell).join(';')]
-    .concat(leads.map((l) => cols.map((c) => csvCell(c === 'motivos' ? l.motivos.join(', ') : c === 'rating' ? fmtNota(l.rating) : l[c])).join(';')))
+    .concat(leads.map((l) => cols.map((c) => csvCell(c === 'motivos' ? l.motivos.join(', ') : c === 'rating' ? (l.semAvaliacoes ? '' : fmtNota(l.rating)) : c === 'userRatingCount' && l.semAvaliacoes ? '' : l[c])).join(';')))
     .join('\r\n');
   writeFileSync(join(dir, 'leads.csv'), '﻿' + csv); // BOM: acentos certos no Excel
 
   const template = readFileSync(join(HERE, 'painel-template.html'), 'utf8');
   // JSON dentro de <script type="application/json">: "<" escapado impede fechar a tag (XSS)
-  const data = JSON.stringify({ meta, leads }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+  // As imagens vão embutidas no painel para anexar no WhatsApp (o link wa.me só leva texto)
+  const imagens = [['como-funciona.png', 'Como funciona'], ['display-balcao.png', 'Display de balcão']]
+    .filter(([f]) => existsSync(join(HERE, 'imagens', f)))
+    .map(([f, titulo]) => ({ arquivo: f, titulo, dataUrl: 'data:image/png;base64,' + readFileSync(join(HERE, 'imagens', f)).toString('base64') }));
+  const data = JSON.stringify({ meta, leads, imagens }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   writeFileSync(join(dir, 'leads.html'), template.replace('/*__DADOS__*/{}', () => data));
 }
 
@@ -352,7 +373,13 @@ async function main() {
   const saida = typeof a.saida === 'string' ? a.saida : join(process.cwd(), 'leads');
   let lugares, chamadas = 0, cidade = a.cidade;
 
-  if (a.demo) {
+  if (a.reusar) {
+    const f = join(saida, 'lugares.json');
+    if (!existsSync(f)) { console.error(`Não há ${f}. Rode uma busca antes.`); process.exit(1); }
+    const c = JSON.parse(readFileSync(f, 'utf8'));
+    lugares = c.lugares; cidade = typeof cidade === 'string' ? cidade : c.cidade;
+    console.log(`Reusando ${lugares.length} negócios da busca de ${new Date(c.geradoEm).toLocaleDateString('pt-BR')} (${cidade}).`);
+  } else if (a.demo) {
     lugares = demo(); cidade = 'Demonstração';
   } else if (typeof a.csv === 'string') {
     lugares = csvParaLugares(lerCSV(readFileSync(a.csv, 'utf8')));
@@ -373,7 +400,7 @@ async function main() {
   }
 
   const leads = processar(lugares, nome, cidade);
-  salvar(leads, saida, { cidade, geradoEm: new Date().toISOString(), nome });
+  salvar(leads, saida, { cidade, geradoEm: new Date().toISOString(), nome }, lugares);
   const quentes = leads.filter((l) => l.score >= 70).length;
   console.log(`✔ ${lugares.length} negócios analisados, ${leads.length} com telefone, ${quentes} com pontuação alta (≥70).`);
   if (chamadas) console.log(`  Buscas usadas: ${chamadas} (cota grátis do Google: ~1.000/mês).`);

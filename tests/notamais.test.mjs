@@ -21,7 +21,7 @@ test('OpenStreetMap: só com nome e telefone, categoria traduzida, prefere celul
   assert.equal(l[0].nationalPhoneNumber, '+55 31 99999-1111');
   const [lead] = processar(l, 'Ana', 'Belo Horizonte, MG');
   assert.equal(lead.semAvaliacoes, true);
-  assert.equal(lead.score, 70);
+  assert.equal(lead.score, 80); // 70 (celular) + 10 (sem site)
   assert.match(lead.mensagem, /^Olá! Aqui é Ana\. Vi a Barbearia Savassi aqui em Belo Horizonte/);
   assert.match(processar(l, '', 'Belo Horizonte')[0].mensagem, /^Olá, tudo bem\? Vi a Barbearia Savassi/);
   assert.match(lead.maps, /^https:\/\/www\.google\.com\/maps\/search\//);
@@ -49,4 +49,21 @@ test('planilha Outscraper (vírgula) e Apify (ponto e vírgula) com aspas e queb
   assert.equal(b[0].rating, 3.9);
   assert.equal(b[0].formattedAddress, 'Rua A,\n10');
   assert.equal(b[0].googleMapsUri, '', 'URL não-Google é descartada');
+});
+
+test('oferta de site só para quem não tem site; sem site ganha +10 pontos', () => {
+  const base = { type: 'node', tags: { shop: 'hairdresser', phone: '+55 31 99999-1111' } };
+  const lugares = osmParaLugares([
+    { ...base, id: 10, tags: { ...base.tags, name: 'Com Site', website: 'https://comsite.com.br' } },
+    { ...base, id: 11, tags: { ...base.tags, name: 'Sem Site' } },
+  ]);
+  const [a, b] = processar(lugares, 'Vinicius', 'Belo Horizonte');
+  const com = [a, b].find((x) => x.nome === 'Com Site'), sem = [a, b].find((x) => x.nome === 'Sem Site');
+  assert.doesNotMatch(com.mensagem, /site simples/);
+  assert.match(sem.mensagem, /site simples e profissional/);
+  assert.equal(sem.score - com.score, 10);
+  assert.ok(sem.motivos.includes('sem site (oferecer site)'));
+  // versão com nota (Google/planilha)
+  const g = processar(csvParaLugares(lerCSV('name,phone,rating,reviews,type\nLoja X,+55 31 98888-0000,4.2,15,Pet shop\n')), 'Vinicius', 'BH');
+  assert.match(g[0].mensagem, /Vi também que vocês ainda não têm site/);
 });
