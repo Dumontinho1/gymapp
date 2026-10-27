@@ -1,14 +1,15 @@
 /* Bump CACHE every time you deploy a change — changing this file's bytes is what
    makes the browser notice there's an update at all (identical sw.js = no update check). */
-const CACHE = 'gymapp-cache-v8';
+const CACHE = 'gymapp-cache-v9';
 
 /* CORE files are required for the app to work: the install is all-or-nothing
    for these. If any of them fails to download (bad gym signal, timeout), the
    install FAILS and the browser keeps running the previous, complete version —
    so a half-downloaded update can never replace a working offline app. */
-const CORE = ['./', './index.html', './style.css', './app.js', './boot.js', './manifest.json'];
+const CORE = ['./', './index.html', './style.css', './app.js', './boot.js', './manifest.json',
+  './config.js', './cloud.js', './library.js', './vendor/supabase.js'];
 /* Nice-to-have files: cached when possible, never block the install. */
-const OPTIONAL = ['./icon.svg', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
+const OPTIONAL = ['./icon.svg', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './termos.html', './privacidade.html'];
 
 const INSTALL_TIMEOUT = 25000;  // ms per file while installing
 const REVALIDATE_TIMEOUT = 8000; // ms for a background refresh

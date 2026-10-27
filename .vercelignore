@@ -1,0 +1,12 @@
+# Só os arquivos do app vão para o ar. Código do backend, testes e
+# ferramentas de desenvolvimento não devem ser servidos publicamente.
+supabase/
+tests/
+scripts/
+node_modules/
+package.json
+package-lock.json
+README.md
+DEPLOY.md
+SECURITY.md
+.env*

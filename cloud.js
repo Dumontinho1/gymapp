@@ -37,7 +37,7 @@
   if(!isObj(sync)) sync = { userId: null, rev: 0, dirty: false, localUpdatedAt: 0, lastSyncAt: 0 };
   var listeners = [];
   var pushTimer = null;
-  var syncing = false;
+  var inflight = null; // sync em andamento (outra chamada espera por ele e roda de novo)
   var applyingRemote = false;
 
   function emit(){ listeners.forEach(function(fn){ try{ fn(); }catch(e){} }); }
@@ -119,6 +119,7 @@
      locais continuam no celular (o usuário pode seguir no Free). */
   function signOut(){
     if(pushTimer){ clearTimeout(pushTimer); pushTimer = null; }
+    flushApp();
     var flush = (isPremium() && sync.dirty) ? pushNow().catch(function(){}) : Promise.resolve();
     return flush.then(function(){ return client.auth.signOut(); }).then(function(){
       user = null; plan = null;
@@ -217,11 +218,18 @@
       .then(function(res){ if(res.error) throw res.error; return res.data; });
   }
 
-  /* Retorna 'synced' | 'skipped' | 'conflict-resolved'. */
+  /* O app grava a ficha com debounce; antes de decidir se há algo a enviar,
+     força a gravação pendente para ela contar como alteração local. */
+  function flushApp(){ if(app && app.flush) app.flush(); }
+
+  /* Retorna 'synced' | 'skipped'. */
   function syncNow(){
+    flushApp();
     if(!client || !user || !isPremium() || !navigator.onLine || !app) return Promise.resolve('skipped');
-    if(syncing) return Promise.resolve('skipped');
-    syncing = true;
+    if(inflight){
+      // não pula: espera o atual e roda de novo, para incluir alterações feitas no meio
+      return inflight.catch(function(){}).then(function(){ return syncNow(); });
+    }
     var attempts = 0;
     function run(){
       attempts++;
@@ -248,7 +256,8 @@
         throw err;
       });
     }
-    return run().then(function(){ return 'synced'; }).finally(function(){ syncing = false; });
+    inflight = run().then(function(){ return 'synced'; }).finally(function(){ inflight = null; });
+    return inflight;
   }
 
   /* ---------- INICIALIZAÇÃO ---------- */
@@ -272,6 +281,10 @@
         onUser(session ? session.user : null);
       }, 0);
     });
+    // com o app aberto, busca alterações de outros aparelhos de tempos em tempos
+    setInterval(function(){
+      if(user && isPremium() && document.visibilityState === 'visible') syncNow().catch(function(){});
+    }, 60000);
     window.addEventListener('online', function(){ if(user) refreshPlan().then(function(){ return syncNow(); }).catch(function(){}); });
     document.addEventListener('visibilitychange', function(){
       if(!user) return;
