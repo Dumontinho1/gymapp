@@ -1,7 +1,7 @@
 {
   "name": "GymApp",
   "short_name": "GymApp",
-  "description": "Controle de treino de musculação, 100% offline",
+  "description": "Controle de treino de musculação: ficha, timer, histórico e evolução. Funciona offline.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

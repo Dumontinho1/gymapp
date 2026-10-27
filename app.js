@@ -16,6 +16,18 @@
   var LS_ACCENT = 'gymapp:accent';
   var LS_ACCENT_COLORS = 'gymapp:accentColors'; // [a, b] — read by the inline <head> script to avoid a color flash
   var LS_BADGES = 'gymapp:badges';
+  /* Chaves que fazem parte do snapshot sincronizado na nuvem (Premium). */
+  var SYNCED_KEYS = [LS_WORKOUTS, LS_ATTEND, LS_PROFILE, LS_HISTORY, LS_PR, LS_SESSIONS, LS_PRLOG, LS_BADGES];
+
+  /* Conta/plano/sync (cloud.js). Sem ele (ou sem config), o app roda local no Free. */
+  var Cloud = window.GymCloud || {
+    enabled: false, ready: Promise.resolve(), isPremium: function(){ return false; },
+    getUser: function(){ return null; }, getPlan: function(){ return null; }, onChange: function(){},
+    attachApp: function(){}, notifyLocalChange: function(){}, trialAvailable: function(){ return true; },
+    getSyncInfo: function(){ return { linked:false }; }
+  };
+  function isPremium(){ return Cloud.isPremium(); }
+  var FREE_HISTORY_DAYS = 7;
 
   var DEFAULT_REST = 90;
   var SET_SECONDS = 45;      // assumed time under tension per set (calorie estimate)
@@ -79,6 +91,7 @@
     try{
       localStorage.setItem(key, JSON.stringify(val));
       flashAutosave();
+      if(SYNCED_KEYS.indexOf(key) > -1) Cloud.notifyLocalChange();
       return true;
     }catch(e){
       if(!saveErrorShown){
@@ -632,6 +645,10 @@
 
   /* ---------- NAV ---------- */
   function switchView(name){
+    if(name === 'progress' && !isPremium()){
+      openPaywall('A aba Progresso (volume, cargas, recordes e conquistas) é exclusiva do Premium.');
+      return;
+    }
     document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
     document.getElementById('view-'+name).classList.add('active');
     document.querySelectorAll('.nav-btn').forEach(function(b){
@@ -639,6 +656,7 @@
     });
     if(name === 'profile') renderProfile();
     if(name === 'progress') renderProgress();
+    if(name === 'history') renderHistory();
   }
 
   /* ---------- HOME: TODAY STRIP ---------- */
@@ -1084,7 +1102,10 @@
       if(targetIdx === selectedDay) renderDayPanel();
     });
   }
-  document.getElementById('btnCopyDay').addEventListener('click', openCopyModal);
+  document.getElementById('btnCopyDay').addEventListener('click', function(){
+    if(!isPremium()){ openPaywall('Copiar treinos entre dias é um recurso Premium.'); return; }
+    openCopyModal();
+  });
   document.getElementById('copyModalCancel').addEventListener('click', closeCopyModal);
   copyModalBackdrop.addEventListener('click', function(e){ if(e.target === copyModalBackdrop) closeCopyModal(); });
 
@@ -1764,6 +1785,7 @@
   });
 
   document.getElementById('btnImportWorkouts').addEventListener('click', function(){
+    if(!isPremium()){ openPaywall('Importar backups e fichas é um recurso Premium. Exportar o seu backup continua liberado no Free.'); return; }
     document.getElementById('importFileInput').click();
   });
 
@@ -1915,6 +1937,7 @@
     var input = e.target;
     var file = input.files[0];
     if(!file) return;
+    if(!isPremium()){ input.value = ''; openPaywall('Importar backups e fichas é um recurso Premium.'); return; }
     if(file.size > MAX_IMPORT_BYTES){
       showToast('Arquivo grande demais (máx. 5 MB)', 'error');
       input.value = '';
@@ -2005,6 +2028,551 @@
     reader.readAsText(file);
   });
 
+  /* ---------- HISTÓRICO DE TREINOS (Free: últimos 7 dias; Premium: tudo) ---------- */
+  function formatDateLong(k){
+    var d = new Date(k + 'T00:00:00');
+    return WEEKDAY_FULL[d.getDay()] + ', ' + pad2(d.getDate()) + '/' + pad2(d.getMonth()+1) + '/' + d.getFullYear();
+  }
+
+  function renderHistory(){
+    var list = document.getElementById('historyList');
+    list.innerHTML = '';
+    var byDate = {};
+    sessions.forEach(function(s){ byDate[s.date] = s; });
+    // dias marcados sem séries preenchidas também entram (sem volume)
+    Object.keys(attendance).forEach(function(k){ if(attendance[k] && isValidDateKey(k) && !byDate[k]) byDate[k] = null; });
+    var dates = Object.keys(byDate).sort().reverse();
+
+    var premium = isPremium();
+    var cutoff = todayKey(new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() - (FREE_HISTORY_DAYS - 1)));
+    var visible = premium ? dates : dates.filter(function(k){ return k >= cutoff; });
+    var hidden = dates.length - visible.length;
+
+    document.getElementById('historyCount').textContent = dates.length + (dates.length === 1 ? ' treino' : ' treinos');
+    document.getElementById('historyHint').textContent = premium
+      ? 'Todos os seus treinos concluídos, do mais recente ao mais antigo. Toque para ver as séries.'
+      : 'No plano Free você vê os treinos dos últimos ' + FREE_HISTORY_DAYS + ' dias. Toque para ver as séries.';
+
+    if(!dates.length){
+      list.innerHTML = '<div class="empty-state">Nenhum treino concluído ainda.<br>Marque o treino do dia na aba Treino para ele aparecer aqui.</div>';
+      return;
+    }
+    if(!visible.length){
+      var none = document.createElement('div');
+      none.className = 'empty-state';
+      none.textContent = 'Nenhum treino nos últimos ' + FREE_HISTORY_DAYS + ' dias.';
+      list.appendChild(none);
+    }
+
+    visible.forEach(function(k){
+      var s = byDate[k];
+      var card = document.createElement('details');
+      card.className = 'history-card';
+      var sum = document.createElement('summary');
+      var title = document.createElement('div');
+      title.className = 'history-date';
+      title.textContent = formatDateLong(k);
+      var meta = document.createElement('div');
+      meta.className = 'history-meta';
+      if(s){
+        var vol = sessionVolume(s);
+        meta.textContent = s.exercises.length + (s.exercises.length === 1 ? ' exercício' : ' exercícios')
+          + ' · ' + formatCount(vol) + ' kg · ~' + formatCount(estimateSessionKcal(s)) + ' kcal';
+      } else {
+        meta.textContent = 'Treino concluído (sem cargas registradas)';
+      }
+      sum.appendChild(title);
+      sum.appendChild(meta);
+      card.appendChild(sum);
+      if(s){
+        var body = document.createElement('div');
+        body.className = 'history-body';
+        s.exercises.forEach(function(ex){
+          var row = document.createElement('div');
+          row.className = 'history-ex';
+          var n = document.createElement('span');
+          n.className = 'history-ex-name';
+          n.textContent = ex.name;
+          var sets = document.createElement('span');
+          sets.className = 'history-ex-sets';
+          // textContent: os valores podem ter vindo de um backup importado
+          sets.textContent = ex.sets.map(function(st){ return (st.reps || '-') + '×' + (st.load || '-') + 'kg'; }).join('  ');
+          row.appendChild(n);
+          row.appendChild(sets);
+          body.appendChild(row);
+        });
+        card.appendChild(body);
+      }
+      list.appendChild(card);
+    });
+
+    if(hidden > 0){
+      var lock = document.createElement('button');
+      lock.type = 'button';
+      lock.className = 'history-locked';
+      lock.textContent = '🔒 + ' + hidden + (hidden === 1 ? ' treino mais antigo' : ' treinos mais antigos') + ' — liberar histórico completo';
+      lock.addEventListener('click', function(){ openPaywall('O histórico completo de treinos é exclusivo do Premium.'); });
+      list.appendChild(lock);
+    }
+  }
+
+  /* ---------- BIBLIOTECA DE EXERCÍCIOS (Free: 5 por grupo) ---------- */
+  var LIB = window.GYMAPP_LIBRARY || { FREE_PER_GROUP: 5, groups: [] };
+  var libraryBackdrop = document.getElementById('libraryModalBackdrop');
+  var libraryGroup = 'all';
+
+  function foldText(t){
+    return String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  function renderLibrary(){
+    var premium = isPremium();
+    var groupsEl = document.getElementById('libraryGroups');
+    var listEl = document.getElementById('libraryList');
+    var q = foldText(document.getElementById('librarySearch').value.trim());
+    groupsEl.innerHTML = '';
+    [{ id:'all', label:'Todos', icon:'' }].concat(LIB.groups).forEach(function(g){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lib-chip' + (libraryGroup === g.id ? ' active' : '');
+      b.textContent = (g.icon ? g.icon + ' ' : '') + g.label;
+      b.addEventListener('click', function(){ libraryGroup = g.id; renderLibrary(); });
+      groupsEl.appendChild(b);
+    });
+
+    listEl.innerHTML = '';
+    var shown = 0, locked = 0;
+    LIB.groups.forEach(function(g){
+      if(libraryGroup !== 'all' && libraryGroup !== g.id) return;
+      var items = g.exercises.map(function(name, i){ return { name: name, free: i < LIB.FREE_PER_GROUP }; })
+        .filter(function(it){ return !q || foldText(it.name).indexOf(q) > -1; });
+      if(!items.length) return;
+      var head = document.createElement('div');
+      head.className = 'lib-group-head';
+      head.textContent = g.icon + ' ' + g.label;
+      listEl.appendChild(head);
+      items.forEach(function(it){
+        var open = premium || it.free;
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'lib-item' + (open ? '' : ' locked');
+        b.textContent = it.name;
+        if(!open){
+          var tag = document.createElement('span');
+          tag.className = 'lock-tag';
+          tag.textContent = '🔒';
+          b.appendChild(tag);
+          locked++;
+        }
+        b.addEventListener('click', function(){
+          if(!open){ closeLibrary(); openPaywall('A biblioteca completa (+110 exercícios) é exclusiva do Premium.'); return; }
+          document.getElementById('exNameInput').value = it.name;
+          closeLibrary();
+          setTimeout(function(){ document.getElementById('exSetsInput').focus(); }, 50);
+        });
+        listEl.appendChild(b);
+        shown++;
+      });
+    });
+    if(!shown){
+      listEl.innerHTML = '<div class="empty-state">Nenhum exercício encontrado. Você pode digitar qualquer nome no campo anterior.</div>';
+    } else if(locked && !premium){
+      var up = document.createElement('div');
+      up.className = 'lib-upsell';
+      up.textContent = locked + ' exercícios liberados no Premium';
+      listEl.appendChild(up);
+    }
+  }
+  function openLibrary(){
+    libraryGroup = 'all';
+    document.getElementById('librarySearch').value = '';
+    renderLibrary();
+    libraryBackdrop.classList.add('open');
+  }
+  function closeLibrary(){ libraryBackdrop.classList.remove('open'); }
+  document.getElementById('btnOpenLibrary').addEventListener('click', openLibrary);
+  document.getElementById('libraryModalClose').addEventListener('click', closeLibrary);
+  document.getElementById('librarySearch').addEventListener('input', renderLibrary);
+  libraryBackdrop.addEventListener('click', function(e){ if(e.target === libraryBackdrop) closeLibrary(); });
+
+  /* ---------- PAYWALL / PLANOS ---------- */
+  var paywallBackdrop = document.getElementById('paywallBackdrop');
+  var paywallInterval = 'year';
+  var paywallMsgEl = document.getElementById('paywallMsg');
+  var paywallCta = document.getElementById('paywallCta');
+  var pendingCheckout = null; // intervalo escolhido antes de pedir login
+  var CFG = window.GYMAPP_CONFIG || {};
+  if(CFG.priceMonthly) document.getElementById('priceMonthly').textContent = CFG.priceMonthly + '/mês';
+  if(CFG.priceYearly) document.getElementById('priceYearly').textContent = CFG.priceYearly + '/ano';
+
+  function renderPaywall(){
+    Array.from(document.querySelectorAll('.plan-opt')).forEach(function(b){
+      var on = b.dataset.interval === paywallInterval;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    var trial = Cloud.trialAvailable();
+    paywallCta.textContent = trial ? 'Testar 7 dias grátis' : 'Assinar agora';
+    document.getElementById('paywallFine').textContent = trial
+      ? 'Pagamento seguro pelo Stripe. Nada é cobrado nos 7 dias de teste; cancele antes e não paga nada. O teste grátis vale uma vez por conta.'
+      : 'Pagamento seguro pelo Stripe. Cancele quando quiser pelo Perfil → Gerenciar assinatura.';
+    if(!Cloud.enabled){
+      paywallCta.disabled = true;
+      paywallMsgEl.textContent = 'As assinaturas ainda não estão disponíveis nesta versão do app.';
+    }
+  }
+  function openPaywall(reason){
+    document.getElementById('paywallReason').textContent = reason || 'Desbloqueie tudo o que o GymApp oferece.';
+    paywallMsgEl.textContent = '';
+    paywallCta.disabled = false;
+    renderPaywall();
+    paywallBackdrop.classList.add('open');
+  }
+  function closePaywall(){ paywallBackdrop.classList.remove('open'); }
+  Array.from(document.querySelectorAll('.plan-opt')).forEach(function(b){
+    b.addEventListener('click', function(){ paywallInterval = b.dataset.interval; renderPaywall(); });
+  });
+  document.getElementById('paywallClose').addEventListener('click', closePaywall);
+  paywallBackdrop.addEventListener('click', function(e){ if(e.target === paywallBackdrop) closePaywall(); });
+
+  var CHECKOUT_ERRORS = {
+    email_not_confirmed: 'Confirme seu e-mail antes de assinar (veja sua caixa de entrada).',
+    already_premium: 'Você já é Premium! 🎉',
+    not_authenticated: 'Sua sessão expirou. Entre novamente.'
+  };
+  function goCheckout(interval){
+    if(!navigator.onLine){ paywallMsgEl.textContent = 'Você precisa de internet para assinar.'; return; }
+    paywallCta.disabled = true;
+    paywallMsgEl.textContent = 'Abrindo pagamento seguro…';
+    Cloud.startCheckout(interval).catch(function(err){
+      paywallCta.disabled = false;
+      var code = err && err.message;
+      paywallMsgEl.textContent = CHECKOUT_ERRORS[code] || 'Não foi possível abrir o pagamento. Tente novamente.';
+      if(code === 'already_premium') Cloud.refreshPlan();
+    });
+  }
+  paywallCta.addEventListener('click', function(){
+    if(!Cloud.enabled) return;
+    if(!Cloud.getUser()){
+      pendingCheckout = paywallInterval;
+      closePaywall();
+      openAuth('signup', 'Crie sua conta para assinar o Premium.');
+      return;
+    }
+    goCheckout(paywallInterval);
+  });
+
+  /* ---------- LOGIN / CADASTRO ---------- */
+  var authBackdrop = document.getElementById('authModalBackdrop');
+  var authMode = 'signin';
+  var authMsgEl = document.getElementById('authMsg');
+  var authEmailEl = document.getElementById('authEmail');
+  var authPwEl = document.getElementById('authPassword');
+  var authSubmitBtn = document.getElementById('authSubmit');
+  var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  var PW_RE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,72}$/;
+
+  function setAuthMode(mode, msg){
+    authMode = mode;
+    var titles = { signin:'Entrar', signup:'Criar conta', forgot:'Recuperar senha', recovery:'Nova senha' };
+    var buttons = { signin:'Entrar', signup:'Criar conta', forgot:'Enviar link', recovery:'Salvar senha' };
+    document.getElementById('authModalTitle').textContent = titles[mode];
+    authSubmitBtn.textContent = buttons[mode];
+    document.getElementById('authEmailField').hidden = mode === 'recovery';
+    document.getElementById('authPasswordField').hidden = mode === 'forgot';
+    document.getElementById('authPasswordRules').hidden = !(mode === 'signup' || mode === 'recovery');
+    document.getElementById('authTermsRow').hidden = mode !== 'signup';
+    document.getElementById('authLinks').hidden = mode === 'recovery';
+    document.getElementById('authToggleMode').textContent = mode === 'signin' ? 'Não tem conta? Criar conta' : 'Já tem conta? Entrar';
+    document.getElementById('authForgot').hidden = mode !== 'signin';
+    authPwEl.setAttribute('autocomplete', mode === 'signin' ? 'current-password' : 'new-password');
+    authMsgEl.textContent = msg || '';
+    authMsgEl.classList.remove('ok');
+  }
+  function openAuth(mode, msg){
+    if(!Cloud.enabled){ showToast('Contas ainda não estão disponíveis nesta versão do app.'); return; }
+    authPwEl.value = '';
+    document.getElementById('authTerms').checked = false;
+    setAuthMode(mode || 'signin', msg);
+    authBackdrop.classList.add('open');
+    setTimeout(function(){ (mode === 'recovery' ? authPwEl : authEmailEl).focus(); }, 250);
+  }
+  function closeAuth(){
+    authBackdrop.classList.remove('open');
+    authPwEl.value = '';
+  }
+  function authInfo(text){ authMsgEl.textContent = text; authMsgEl.classList.add('ok'); }
+
+  document.getElementById('authCancel').addEventListener('click', function(){ pendingCheckout = null; closeAuth(); });
+  document.getElementById('authToggleMode').addEventListener('click', function(){ setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); });
+  document.getElementById('authForgot').addEventListener('click', function(){ setAuthMode('forgot'); });
+
+  document.getElementById('authForm').addEventListener('submit', function(e){
+    e.preventDefault();
+    var email = authEmailEl.value.trim().toLowerCase();
+    var pw = authPwEl.value;
+    authMsgEl.classList.remove('ok');
+    if(authMode !== 'recovery' && !EMAIL_RE.test(email)){ authMsgEl.textContent = 'Digite um e-mail válido.'; return; }
+    if((authMode === 'signup' || authMode === 'recovery') && !PW_RE.test(pw)){
+      authMsgEl.textContent = 'Senha fraca: use 8+ caracteres com maiúscula, minúscula e número.'; return;
+    }
+    if(authMode === 'signin' && !pw){ authMsgEl.textContent = 'Digite sua senha.'; return; }
+    if(authMode === 'signup' && !document.getElementById('authTerms').checked){
+      authMsgEl.textContent = 'Para criar a conta, aceite os Termos de Uso e a Política de Privacidade.'; return;
+    }
+    if(!navigator.onLine){ authMsgEl.textContent = 'Você precisa de internet para isso.'; return; }
+
+    authSubmitBtn.disabled = true;
+    authMsgEl.textContent = 'Aguarde…';
+    var done = function(){ authSubmitBtn.disabled = false; };
+    var fail = function(err){ done(); authMsgEl.textContent = (err && err.message) || 'Não foi possível concluir.'; };
+
+    if(authMode === 'signin'){
+      Cloud.signIn(email, pw).then(function(){
+        done(); closeAuth();
+        showToast('Bem-vindo de volta! 💪');
+        Cloud.ready.then(function(){ return Cloud.refreshPlan(); }).then(function(){
+          if(pendingCheckout && !isPremium()){ var iv = pendingCheckout; pendingCheckout = null; openPaywall(''); paywallInterval = iv; renderPaywall(); goCheckout(iv); }
+        });
+      }, fail);
+    } else if(authMode === 'signup'){
+      Cloud.signUp(email, pw).then(function(r){
+        done();
+        authPwEl.value = '';
+        if(r.needsConfirmation){
+          setAuthMode('signin', '');
+          authInfo('Enviamos um link de confirmação para ' + email + '. Depois de confirmar, entre com sua senha.');
+        } else {
+          closeAuth();
+          showToast('Conta criada! 🎉');
+        }
+      }, fail);
+    } else if(authMode === 'forgot'){
+      // mesma resposta exista ou não a conta (não revela quais e-mails estão cadastrados)
+      Cloud.resetPassword(email).then(function(){
+        done(); authInfo('Se existir uma conta com esse e-mail, você vai receber um link para criar uma nova senha.');
+      }, function(err){
+        if(err && /tentativas|conexão/.test(err.message)) fail(err);
+        else { done(); authInfo('Se existir uma conta com esse e-mail, você vai receber um link para criar uma nova senha.'); }
+      });
+    } else if(authMode === 'recovery'){
+      Cloud.updatePassword(pw).then(function(){ done(); closeAuth(); showToast('Senha alterada ✓'); }, fail);
+    }
+  });
+
+  /* ---------- CONTA E PLANO (Perfil) ---------- */
+  function fmtDate(iso){
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? '' : pad2(d.getDate()) + '/' + pad2(d.getMonth()+1) + '/' + d.getFullYear();
+  }
+  function accountButton(label, cls, fn){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = label;
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  function renderAccount(){
+    var u = Cloud.getUser();
+    var plan = Cloud.getPlan();
+    var premium = isPremium();
+    var titleEl = document.getElementById('accountTitle');
+    var subEl = document.getElementById('accountSub');
+    var badge = document.getElementById('planBadge');
+    var actions = document.getElementById('accountActions');
+    var syncEl = document.getElementById('accountSync');
+    actions.innerHTML = '';
+    syncEl.hidden = true;
+
+    badge.textContent = premium ? (plan && plan.status === 'trialing' ? 'Teste Premium' : 'Premium') : 'Free';
+    badge.className = 'plan-badge' + (premium ? ' premium' : '');
+
+    if(!Cloud.enabled){
+      titleEl.textContent = 'Modo local';
+      subEl.textContent = 'Seus dados ficam só neste aparelho.';
+      return;
+    }
+    if(!u){
+      titleEl.textContent = 'Sua conta';
+      subEl.textContent = 'Use sem conta no plano Free, ou entre para assinar o Premium e ter backup na nuvem.';
+      actions.appendChild(accountButton('Entrar', 'btn-primary', function(){ openAuth('signin'); }));
+      actions.appendChild(accountButton('Criar conta', 'btn-secondary', function(){ openAuth('signup'); }));
+      actions.appendChild(accountButton('👑 Ver planos', 'btn-link-accent', function(){ openPaywall(''); }));
+      return;
+    }
+
+    titleEl.textContent = u.email || 'Conta';
+    if(premium){
+      var end = plan.periodEnd ? fmtDate(plan.periodEnd) : '';
+      if(plan.status === 'trialing') subEl.textContent = 'Teste grátis até ' + end + (plan.cancelAtPeriodEnd ? ' (cancelado — não será cobrado)' : ' — depois renova automaticamente.');
+      else subEl.textContent = (plan.interval === 'year' ? 'Plano anual' : 'Plano mensal') + (end ? (plan.cancelAtPeriodEnd ? ' · termina em ' : ' · renova em ') + end : '');
+      actions.appendChild(accountButton('Gerenciar assinatura', 'btn-secondary', openPortal));
+      actions.appendChild(accountButton('☁️ Sincronizar agora', 'btn-secondary', function(){
+        if(!navigator.onLine){ showToast('Sem internet — sincroniza quando a conexão voltar'); return; }
+        Cloud.syncNow().then(function(){ showToast('Sincronizado ✓'); renderAccount(); }, function(){ showToast('Falha ao sincronizar. Tente novamente.', 'error'); });
+      }));
+      var info = Cloud.getSyncInfo();
+      syncEl.hidden = false;
+      syncEl.textContent = info.lastSyncAt
+        ? '☁️ Última sincronização: ' + fmtDate(info.lastSyncAt) + ' ' + pad2(new Date(info.lastSyncAt).getHours()) + ':' + pad2(new Date(info.lastSyncAt).getMinutes()) + (info.dirty ? ' · alterações pendentes' : '')
+        : '☁️ Aguardando a primeira sincronização';
+    } else {
+      if(plan && plan.status === 'past_due') subEl.textContent = '⚠ Pagamento pendente — atualize o cartão para manter o Premium.';
+      else subEl.textContent = 'Plano Free. Assine o Premium para liberar tudo e ter backup na nuvem.';
+      actions.appendChild(accountButton(Cloud.trialAvailable() ? '👑 Testar Premium grátis' : '👑 Assinar Premium', 'btn-primary', function(){ openPaywall(''); }));
+      if(plan && plan.hasCustomer) actions.appendChild(accountButton('Pagamentos', 'btn-secondary', openPortal));
+    }
+    actions.appendChild(accountButton('Sair', 'btn-secondary', doSignOut));
+    actions.appendChild(accountButton('Excluir conta', 'btn-danger-link', doDeleteAccount));
+  }
+
+  function openPortal(){
+    if(!navigator.onLine){ showToast('Você precisa de internet para isso.'); return; }
+    showToast('Abrindo o portal de pagamentos…');
+    Cloud.openPortal().catch(function(){ showToast('Não foi possível abrir o portal. Tente novamente.', 'error'); });
+  }
+  function doSignOut(){
+    askConfirm('Sair da conta', 'Seus dados continuam neste aparelho, mas o backup automático e os recursos Premium ficam desativados até você entrar de novo.', 'Sair').then(function(ok){
+      if(!ok) return;
+      Cloud.signOut().then(function(){ showToast('Você saiu da conta'); renderPlanUI(); });
+    });
+  }
+  function doDeleteAccount(){
+    askConfirm('Excluir conta',
+      'Isso apaga sua conta e TODOS os dados na nuvem, e cancela qualquer assinatura ativa. Não dá para desfazer. Os dados deste aparelho continuam aqui até você limpar os dados do site.',
+      'Continuar').then(function(ok){
+      if(!ok) return;
+      return askConfirm('Tem certeza?', 'Última confirmação: excluir a conta ' + ((Cloud.getUser() || {}).email || '') + ' permanentemente?', 'Excluir para sempre');
+    }).then(function(ok){
+      if(!ok) return;
+      if(!navigator.onLine){ showToast('Você precisa de internet para excluir a conta.', 'error'); return; }
+      Cloud.deleteAccount().then(function(){ showToast('Conta excluída.'); renderPlanUI(); },
+        function(){ showToast('Não foi possível excluir a conta. Tente novamente.', 'error'); });
+    });
+  }
+
+  /* Atualiza tudo que depende do plano: cadeados, perfil, histórico, avisos. */
+  function renderPlanUI(){
+    var premium = isPremium();
+    document.getElementById('navProgressLock').hidden = premium;
+    Array.from(document.querySelectorAll('[data-premium-lock]')).forEach(function(el){ el.hidden = premium; });
+    document.getElementById('backupHint').textContent = premium
+      ? '☁️ Backup automático na nuvem ativo — seus dados também ficam salvos na sua conta. Exportar um arquivo continua disponível.'
+      : 'Seus dados ficam só neste celular — sem backup, se o navegador limpar os dados do site, tudo se perde. Exporte um backup de vez em quando (recomendado: semanalmente). No Premium o backup na nuvem é automático.';
+    renderAccount();
+    // perdeu o Premium com a aba Progresso aberta: volta para o Treino
+    if(!premium && document.getElementById('view-progress').classList.contains('active')) switchView('home');
+    if(document.getElementById('view-history').classList.contains('active')) renderHistory();
+  }
+
+  /* ---------- SYNC: escolha na primeira vez (dados nos dois lados) ---------- */
+  var syncModalBackdrop = document.getElementById('syncModalBackdrop');
+  function summarizeState(d){
+    var nSessions = Array.isArray(d.sessions) ? d.sessions.length : 0;
+    var nDays = isObj(d.attendance) ? Object.keys(d.attendance).length : 0;
+    var nEx = 0;
+    if(isObj(d.workouts)) Object.keys(d.workouts).forEach(function(k){
+      var w = d.workouts[k];
+      if(isObj(w) && Array.isArray(w.exercises)) nEx += w.exercises.length;
+    });
+    return { text: Math.max(nSessions, nDays) + ' treinos concluídos · ' + nEx + ' exercícios na ficha' };
+  }
+  function askSyncChoice(local, cloud, cloudUpdatedAt){
+    document.getElementById('syncLocalInfo').textContent = local.text;
+    document.getElementById('syncCloudInfo').textContent = cloud.text + (cloudUpdatedAt ? ' · salvo em ' + fmtDate(cloudUpdatedAt) : '');
+    syncModalBackdrop.classList.add('open');
+    return new Promise(function(resolve){
+      function pick(choice){
+        syncModalBackdrop.classList.remove('open');
+        document.getElementById('syncChooseLocal').onclick = null;
+        document.getElementById('syncChooseCloud').onclick = null;
+        resolve(choice);
+      }
+      document.getElementById('syncChooseLocal').onclick = function(){ pick('local'); };
+      document.getElementById('syncChooseCloud').onclick = function(){ pick('cloud'); };
+    });
+  }
+
+  function getSyncState(){
+    flushWorkouts();
+    return {
+      app: 'GymApp', version: 2,
+      workouts: workouts, profile: profile, attendance: attendance,
+      history: history, prs: prs, sessions: sessions, prlog: prlog, badges: badges
+    };
+  }
+  /* Dados que chegam da nuvem passam pelos mesmos sanitizadores do import. */
+  function applySyncState(d){
+    if(!isObj(d)) return;
+    cancelResync();
+    workouts = sanitizeWorkouts(d.workouts) || {};
+    profile = sanitizeProfile(d.profile) || { name:'', height:'', weightHistory:[] };
+    attendance = sanitizeAttendance(d.attendance) || {};
+    history = sanitizeHistory(d.history) || {};
+    prs = sanitizePRs(d.prs) || {};
+    sessions = sanitizeSessions(d.sessions) || [];
+    prlog = sanitizePRLog(d.prlog) || [];
+    badges = sanitizeBadges(d.badges) || {};
+    flushWorkouts();
+    saveJSON(LS_PROFILE, profile);
+    persistAttendance(); persistHistory(); persistPRs(); persistSessions(); persistPRLog(); persistBadges();
+    renderTodayStrip();
+    renderDayTabs();
+    renderDayPanel();
+    if(document.getElementById('view-profile').classList.contains('active')) renderProfile();
+    if(document.getElementById('view-history').classList.contains('active')) renderHistory();
+    if(document.getElementById('view-progress').classList.contains('active')) renderProgress();
+  }
+  function hasLocalData(){
+    return sessions.length > 0 || Object.keys(attendance).length > 0 || Object.keys(workouts).some(function(k){
+      return workouts[k] && workouts[k].exercises && workouts[k].exercises.length;
+    });
+  }
+
+  /* Volta do Stripe / links de e-mail: mensagens e limpeza da URL. */
+  function handleReturnParams(){
+    var params = new URLSearchParams(location.search);
+    var hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+    var checkout = params.get('checkout');
+    var authErr = params.get('error_description') || hash.get('error_description');
+    if(checkout === 'success'){
+      showToast('Pagamento confirmado! Ativando o Premium…');
+      var tries = 0;
+      (function poll(){
+        Cloud.ready.then(function(){ return Cloud.refreshPlan(); }).then(function(){
+          if(isPremium()){ showToast('👑 Premium ativado! Aproveite.', 'pr'); renderPlanUI(); return; }
+          if(++tries < 10) setTimeout(poll, 3000);
+          else showToast('O pagamento está sendo processado. O Premium aparece em instantes.');
+        });
+      })();
+    } else if(checkout === 'cancel'){
+      showToast('Pagamento cancelado — nada foi cobrado.');
+    } else if(params.get('portal') === 'return'){
+      Cloud.ready.then(function(){ return Cloud.refreshPlan(); });
+    }
+    if(authErr) showToast(/expired|expirad/i.test(authErr) ? 'O link expirou. Peça um novo.' : 'Link inválido ou já usado. Tente entrar com sua senha.', 'error');
+    if(checkout || params.get('portal') || authErr){
+      try{ window.history.replaceState(null, '', location.pathname); }catch(e){} // `history` local = histórico de exercícios
+    }
+  }
+
+  function attachCloud(){
+    Cloud.onChange(renderPlanUI);
+    Cloud.attachApp({
+      getState: getSyncState,
+      applyState: applySyncState,
+      flush: function(){ if(workoutsSaveTimer) flushWorkouts(); },
+      hasData: hasLocalData,
+      summarize: summarizeState,
+      askSyncChoice: askSyncChoice,
+      onPasswordRecovery: function(){ openAuth('recovery', 'Digite sua nova senha.'); }
+    });
+    renderPlanUI();
+    handleReturnParams();
+  }
+
   /* ---------- NAV BUTTONS ---------- */
   document.querySelectorAll('.nav-btn').forEach(function(btn){
     btn.addEventListener('click', function(){ switchView(btn.dataset.view); });
@@ -2014,6 +2582,10 @@
   document.addEventListener('keydown', function(e){
     if(e.key === 'Escape'){
       if(confirmBackdrop.classList.contains('open')) closeConfirm(false);
+      else if(syncModalBackdrop.classList.contains('open')) return; // escolha obrigatória
+      else if(authBackdrop.classList.contains('open')) closeAuth();
+      else if(libraryBackdrop.classList.contains('open')) closeLibrary();
+      else if(paywallBackdrop.classList.contains('open')) closePaywall();
       else if(copyModalBackdrop.classList.contains('open')) closeCopyModal();
       else if(modalBackdrop.classList.contains('open')) closeModal();
     } else if(e.key === 'Enter' && modalBackdrop.classList.contains('open')
@@ -2052,8 +2624,9 @@
      The page can write to the same cache the service worker reads, so it can
      finish (or repair) the offline copy by itself — no manual reloads, which
      matters for a home-screen shortcut. Keep these in sync with sw.js. */
-  var OFFLINE_CACHE = 'gymapp-cache-v8';              // MUST equal CACHE in sw.js
-  var OFFLINE_CORE = ['./', './index.html', './style.css', './app.js', './boot.js', './manifest.json'];
+  var OFFLINE_CACHE = 'gymapp-cache-v9';              // MUST equal CACHE in sw.js
+  var OFFLINE_CORE = ['./', './index.html', './style.css', './app.js', './boot.js', './manifest.json',
+    './config.js', './cloud.js', './library.js', './vendor/supabase.js'];
   var preparing = false, autoPrepareTried = false, prepareError = '';
 
   function inspectOffline(){
@@ -2151,7 +2724,7 @@
     var hasData = Object.keys(workouts).some(function(k){
       return workouts[k] && workouts[k].exercises && workouts[k].exercises.length;
     });
-    if(!hasData) return;
+    if(!hasData || (isPremium() && Cloud.getSyncInfo().linked)) return; // Premium já tem backup automático
     var last = loadJSON(LS_LAST_EXPORT, null);
     if(!isValidDateKey(last)) last = null; // malformed value → treat as "never exported" (NaN would silence the nudge forever)
     var daysSince = last ?(new Date(todayKey()+'T00:00:00') - new Date(last+'T00:00:00')) / 86400000 : Infinity;
@@ -2159,7 +2732,7 @@
       setTimeout(function(){ showToast('💾 Faça um backup: Perfil → Exportar backup completo'); }, 1400);
     }
   }
-  maybeSuggestBackup();
+  Cloud.ready.then(maybeSuggestBackup);
 
   /* ---------- INIT ---------- */
   normalizeLoadedState(); // validate everything read from localStorage before the first render
@@ -2171,11 +2744,12 @@
   /* Another tab/window of the app wrote to storage: this tab's in-memory copy is
      now stale and would overwrite those changes on its next save. */
   window.addEventListener('storage', function(e){
-    if(e.key && e.key.indexOf('gymapp:') === 0 && e.key !== LS_ACCENT_COLORS){
+    if(e.key && SYNCED_KEYS.indexOf(e.key) > -1){
       showToast('Dados alterados em outra aba — recarregue a página para evitar perder alterações', 'error');
     }
   });
   updateOnlineStatus();
+  attachCloud();
   renderTodayStrip();
   renderDayTabs();
   renderDayPanel();

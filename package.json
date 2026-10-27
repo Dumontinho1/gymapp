@@ -1,0 +1,19 @@
+{
+  "name": "gymapp",
+  "private": true,
+  "version": "1.0.0",
+  "description": "GymApp — PWA de treino com planos Free/Premium",
+  "scripts": {
+    "vendor": "node scripts/vendor.mjs",
+    "db:start": "supabase start",
+    "db:reset": "supabase db reset",
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "node --test tests/e2e/*.test.mjs"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "2.118.0",
+    "qrcode": "^1.5.4",
+    "stripe": "23.0.1",
+    "supabase": "2.122.0"
+  }
+}

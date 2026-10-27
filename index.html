@@ -1,8 +1,7 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="theme-color" content="#7c3aed">
@@ -90,7 +89,7 @@
       <div class="day-panel" id="dayPanel">
         <div class="day-panel-head">
           <input type="text" id="dayNameInput" class="day-name-input" placeholder="Nome do treino (opcional)" maxlength="30">
-          <button class="btn-copy-day" id="btnCopyDay" title="Copiar este treino para outro dia">⧉ Copiar</button>
+          <button class="btn-copy-day" id="btnCopyDay" title="Copiar este treino para outro dia">⧉ Copiar<span class="lock-tag" data-premium-lock hidden>🔒</span></button>
         </div>
 
         <div class="exercise-list" id="exerciseList"></div>
@@ -128,6 +127,18 @@
 
     <!-- PROFILE VIEW -->
     <section class="view" id="view-profile">
+      <div class="account-card" id="accountCard">
+        <div class="account-head">
+          <div>
+            <div class="account-title" id="accountTitle">Sua conta</div>
+            <div class="account-sub" id="accountSub">Use sem conta, ou crie uma para assinar o Premium.</div>
+          </div>
+          <span class="plan-badge" id="planBadge">Free</span>
+        </div>
+        <div class="account-actions" id="accountActions"></div>
+        <div class="account-sync" id="accountSync" hidden></div>
+      </div>
+
       <div class="profile-card">
         <div class="avatar">
           <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -231,16 +242,29 @@
         </div>
         <div class="settings-row">
           <span>Importar backup (JSON)</span>
-          <button class="btn-io" id="btnImportWorkouts">⬆ Importar</button>
+          <button class="btn-io" id="btnImportWorkouts">⬆ Importar<span class="lock-tag" data-premium-lock hidden>🔒</span></button>
         </div>
-        <p class="settings-hint">Seus dados ficam só neste celular — sem backup, se o navegador limpar os dados do site, tudo se perde. Exporte um backup de vez em quando (recomendado: semanalmente) e guarde o arquivo em algum lugar seguro (e-mail, Drive, etc).</p>
+        <p class="settings-hint" id="backupHint">Seus dados ficam só neste celular — sem backup, se o navegador limpar os dados do site, tudo se perde. Exporte um backup de vez em quando (recomendado: semanalmente) e guarde o arquivo em algum lugar seguro (e-mail, Drive, etc).</p>
         <input type="file" id="importFileInput" class="file-input-hidden" accept="application/json,.json">
       </div>
 
       <div class="offline-status" id="offlineStatus"></div>
       <div class="offline-detail" id="offlineDetail" hidden></div>
       <div class="offline-actions"><button class="btn-io" id="btnPrepareOffline" hidden>Preparar uso offline agora</button></div>
-      <div class="app-footer">GymApp · funciona 100% offline</div>
+      <div class="app-footer">GymApp · funciona offline · <a href="termos.html">Termos</a> · <a href="privacidade.html">Privacidade</a></div>
+    </section>
+
+    <!-- HISTORY VIEW -->
+    <section class="view" id="view-history">
+      <div class="panel-card history-summary">
+        <div class="panel-head-row">
+          <div class="panel-head">Histórico de treinos</div>
+          <span class="heatmap-count" id="historyCount"></span>
+        </div>
+        <p class="settings-hint" id="historyHint"></p>
+      </div>
+      <div class="history-list" id="historyList"></div>
+      <div class="app-footer">GymApp · funciona offline · <a href="termos.html">Termos</a> · <a href="privacidade.html">Privacidade</a></div>
     </section>
 
     <!-- PROGRESS VIEW -->
@@ -296,7 +320,7 @@
         <div class="badge-grid" id="badgeGrid"></div>
       </div>
 
-      <div class="app-footer">GymApp · funciona 100% offline</div>
+      <div class="app-footer">GymApp · funciona offline · <a href="termos.html">Termos</a> · <a href="privacidade.html">Privacidade</a></div>
     </section>
 
   </main>
@@ -313,7 +337,12 @@
       <svg viewBox="0 0 24 24" fill="none"><path d="M3 11L12 4l9 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1v-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>Treino</span>
     </button>
+    <button class="nav-btn" data-view="history">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="2"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Histórico</span>
+    </button>
     <button class="nav-btn" data-view="progress">
+      <span class="nav-lock" id="navProgressLock" hidden>🔒</span>
       <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V10M10 19V5M16 19v-7M20 19V8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>Progresso</span>
     </button>
@@ -332,6 +361,7 @@
       <span>Nome do exercício</span>
       <input type="text" id="exNameInput" placeholder="Ex: Supino reto" maxlength="40">
     </label>
+    <button type="button" class="btn-library" id="btnOpenLibrary">📚 Escolher da biblioteca</button>
     <label class="field">
       <span>Quantidade de séries</span>
       <input type="number" id="exSetsInput" min="1" max="12" value="3" inputmode="numeric">
@@ -355,6 +385,97 @@
   </div>
 </div>
 
+<!-- EXERCISE LIBRARY MODAL -->
+<div class="modal-backdrop" id="libraryModalBackdrop">
+  <div class="modal modal-tall" role="dialog" aria-modal="true" aria-labelledby="libraryModalTitle">
+    <h3 id="libraryModalTitle">Biblioteca de exercícios</h3>
+    <input type="search" id="librarySearch" class="library-search" placeholder="Buscar exercício…" maxlength="40" aria-label="Buscar exercício">
+    <div class="library-groups" id="libraryGroups"></div>
+    <div class="library-list" id="libraryList"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="libraryModalClose">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- AUTH MODAL (entrar / criar conta / esqueci a senha / nova senha) -->
+<div class="modal-backdrop" id="authModalBackdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+    <h3 id="authModalTitle">Entrar</h3>
+    <form id="authForm" novalidate>
+      <label class="field" id="authEmailField">
+        <span>E-mail</span>
+        <input type="email" id="authEmail" autocomplete="email" inputmode="email" maxlength="254" required>
+      </label>
+      <label class="field" id="authPasswordField">
+        <span>Senha</span>
+        <input type="password" id="authPassword" autocomplete="current-password" minlength="8" maxlength="72" required>
+      </label>
+      <p class="modal-hint" id="authPasswordRules" hidden>Mínimo 8 caracteres, com letra maiúscula, minúscula e número.</p>
+      <label class="check-row" id="authTermsRow" hidden>
+        <input type="checkbox" id="authTerms">
+        <span>Li e aceito os <a href="termos.html" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="privacidade.html" target="_blank" rel="noopener">Política de Privacidade</a>.</span>
+      </label>
+      <p class="auth-msg" id="authMsg" role="alert"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="authCancel">Cancelar</button>
+        <button type="submit" class="btn-primary" id="authSubmit">Entrar</button>
+      </div>
+    </form>
+    <div class="auth-links" id="authLinks">
+      <button type="button" class="link-btn" id="authToggleMode">Não tem conta? Criar conta</button>
+      <button type="button" class="link-btn" id="authForgot">Esqueci minha senha</button>
+    </div>
+  </div>
+</div>
+
+<!-- PAYWALL / PLANOS -->
+<div class="modal-backdrop" id="paywallBackdrop">
+  <div class="modal paywall" role="dialog" aria-modal="true" aria-labelledby="paywallTitle">
+    <div class="paywall-crown">👑</div>
+    <h3 id="paywallTitle">GymApp Premium</h3>
+    <p class="modal-hint" id="paywallReason"></p>
+    <ul class="paywall-list">
+      <li>📈 Aba Progresso completa: volume, cargas, recordes e conquistas</li>
+      <li>☁️ Backup automático e sync entre aparelhos</li>
+      <li>🗓️ Histórico de treinos ilimitado</li>
+      <li>📚 Biblioteca completa com +110 exercícios</li>
+      <li>⧉ Copiar treinos entre dias</li>
+      <li>⬆ Importar backups e fichas</li>
+    </ul>
+    <div class="plan-options" role="radiogroup" aria-label="Escolha o plano">
+      <button type="button" class="plan-opt" data-interval="year" role="radio" aria-checked="true">
+        <span class="plan-opt-tag">Economize 30%</span>
+        <span class="plan-opt-name">Anual</span>
+        <span class="plan-opt-price" id="priceYearly">R$ 49,90/ano</span>
+        <span class="plan-opt-sub">≈ R$ 4,16/mês</span>
+      </button>
+      <button type="button" class="plan-opt" data-interval="month" role="radio" aria-checked="false">
+        <span class="plan-opt-name">Mensal</span>
+        <span class="plan-opt-price" id="priceMonthly">R$ 5,90/mês</span>
+        <span class="plan-opt-sub">cancele quando quiser</span>
+      </button>
+    </div>
+    <p class="auth-msg" id="paywallMsg" role="alert"></p>
+    <button class="btn-primary btn-block" id="paywallCta">Testar 7 dias grátis</button>
+    <p class="modal-hint paywall-fine" id="paywallFine">Pagamento seguro pelo Stripe. Sem cobrança nos 7 dias de teste; cancele antes e não paga nada. O teste grátis vale uma vez por conta.</p>
+    <p class="modal-hint paywall-fine paywall-consent">🔐 Ao assinar, você consente que seus dados de treino, peso e altura sejam guardados na nuvem para o backup e o sync. Para revogar, saia da conta ou exclua-a. <a href="privacidade.html" target="_blank" rel="noopener">Privacidade</a> · <a href="termos.html" target="_blank" rel="noopener">Termos</a></p>
+    <button class="btn-secondary btn-block" id="paywallClose">Agora não</button>
+  </div>
+</div>
+
+<!-- SYNC CONFLICT -->
+<div class="modal-backdrop" id="syncModalBackdrop">
+  <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="syncModalTitle" aria-describedby="syncModalMsg">
+    <h3 id="syncModalTitle">Qual versão manter?</h3>
+    <p class="modal-hint" id="syncModalMsg">Este aparelho e a sua conta na nuvem têm dados diferentes. A versão escolhida substitui a outra.</p>
+    <div class="sync-choices">
+      <button class="sync-choice" id="syncChooseLocal"><b>📱 Este aparelho</b><span id="syncLocalInfo"></span></button>
+      <button class="sync-choice" id="syncChooseCloud"><b>☁️ Nuvem</b><span id="syncCloudInfo"></span></button>
+    </div>
+  </div>
+</div>
+
 <!-- GENERIC CONFIRM MODAL (delete / overwrite actions) -->
 <div class="modal-backdrop" id="confirmModalBackdrop">
   <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmModalTitle" aria-describedby="confirmModalMsg">
@@ -367,6 +488,10 @@
   </div>
 </div>
 
+<script src="config.js"></script>
+<script src="vendor/supabase.js"></script>
+<script src="cloud.js"></script>
+<script src="library.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

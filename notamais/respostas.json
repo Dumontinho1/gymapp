@@ -1,0 +1,113 @@
+{
+  "_comentario": "Respostas prontas do painel. Edite à vontade. Marcadores: {loja} = nome da loja, {nome} = seu nome, {fimTeste} = data de hoje + 30 dias. Depois de editar, regere o painel com: node notamais/buscar-leads.mjs --reusar --saida leads/bh --nome Vinicius",
+  "respostas": [
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "📸 Como funciona (mandar com a imagem)",
+      "imagem": 0,
+      "texto": "Funciona assim:\n1️⃣ Eu crio um link e um QR code exclusivos da {loja}, que levam direto para a tela de avaliação de vocês no Google.\n2️⃣ Vocês recebem um display de balcão (mando o arquivo pronto para imprimir) e uma mensagem pronta para mandar aos clientes depois do atendimento.\n3️⃣ Toda semana eu te mando um resumo: quantas avaliações novas entraram e como está a nota.\n\nNos 30 dias de teste não tem custo nenhum. Se gostar, depois fica R$ 39 por mês, e você cancela quando quiser. Quer que eu prepare o da {loja}?"
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "🪧 Exemplo do display de balcão (mandar com a imagem)",
+      "imagem": 1,
+      "texto": "É assim que fica o display no balcão da {loja}: o cliente aponta a câmera e já cai na tela de avaliar no Google ⭐ Eu mando o arquivo pronto para imprimir."
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "💰 Quanto custa?",
+      "texto": "Os primeiros 30 dias são grátis. Depois são R$ 39 por mês, valor fixo para quem entrar agora no começo. Sem fidelidade. Se um único cliente novo por mês vier pelo Google, já se pagou 😉"
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "🙋 \"Eu já peço avaliação\"",
+      "texto": "Que ótimo, é o mais importante! A diferença é deixar isso automático e com o link certo, que abre direto a tela de avaliação. Quando depende de lembrar, no dia corrido acaba ficando para trás. Quer testar 30 dias e comparar com o que vocês já têm?"
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "⏱️ \"Não tenho tempo\"",
+      "texto": "Justamente por isso: eu deixo tudo pronto. Vocês só colocam o display no balcão e, se quiserem, copiam e colam a mensagem pronta para os clientes. Leva 2 minutos para começar."
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "🤨 \"Isso é golpe? Como conseguiu meu número?\"",
+      "texto": "Entendo a desconfiança! Peguei o número que está público no perfil da {loja} na internet. Não peço senha, acesso nem pagamento adiantado: o teste é grátis e você só paga se quiser continuar. Se preferir, posso passar aí pessoalmente para te mostrar."
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "✅ \"Isso é permitido pelo Google?\"",
+      "texto": "É 100% permitido. O Google incentiva pedir avaliações. O que ele proíbe é avaliação falsa, dar brinde ou desconto em troca, ou pedir só para quem gostou. A gente pede para todos os clientes, sem oferecer nada em troca, exatamente como o Google recomenda."
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "🚫 \"Vocês compram avaliações?\"",
+      "texto": "Não, de jeito nenhum! Isso é proibido e o Google derruba. Todas as avaliações vêm de clientes reais de vocês. Só facilitamos o caminho até a tela de avaliar."
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "😬 \"E se alguém der nota ruim?\"",
+      "texto": "Pode acontecer, e responder bem a uma crítica até passa confiança. Além do link do Google, o cliente também tem um canal para falar direto com você, então dá para resolver um problema rápido. E quando os clientes satisfeitos começam a avaliar, a média sobe naturalmente."
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "📄 \"Me manda mais informações\"",
+      "imagem": 0,
+      "texto": "Claro! Te mandei a imagem acima com o resumo. Posso já deixar o QR code da {loja} pronto, sem compromisso, para você ver como fica? Leva 1 minuto e não tem custo."
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "🎉 Fechar o teste grátis",
+      "texto": "Fechado! 🎉 Vou preparar tudo da {loja}. Me confirma:\n1. O nome exato do negócio como aparece no Google\n2. Seu nome (para eu te mandar os resumos)\n3. Prefere o display em tamanho A6 (cartão) ou A5 (folha)?\n\nO teste vai de hoje até {fimTeste}. Uns dias antes de acabar eu te mostro o resultado e você decide se continua."
+    },
+    {
+      "grupo": "Avaliações no Google",
+      "titulo": "🏁 Fim do teste (dia 25)",
+      "texto": "Oi! O teste da {loja} acaba em 5 dias. Resultado até agora: +[X] avaliações (de [A] para [B]) e nota [N] ⭐\nPara continuar são R$ 39 por mês (preço de fundador, fixo para sempre). Posso te mandar o link de pagamento? Se preferir parar, sem problema, e o QR code continua funcionando para você."
+    },
+    {
+      "grupo": "Site",
+      "titulo": "🌐 Como é o site + preços",
+      "texto": "O site é uma página profissional da {loja} com fotos, serviços, horários, mapa e um botão que abre o WhatsApp de vocês direto. Funciona no celular, que é de onde vem quase todo cliente hoje, e ajuda a aparecer no Google.\n\nFica pronto em até 7 dias. Para criar, só preciso de umas fotos, a lista de serviços (com preços, se quiserem mostrar) e os horários.\n\n💻 Site: R$ 300 à vista ou 3× de R$ 100\n🔧 Hospedagem e manutenção (opcional): R$ 50/mês, com o site sempre no ar e alterações simples (preços, horários, fotos) por minha conta\n\nSe quiser, faço uma prévia da página inicial, sem compromisso, para você ver como ficaria 😉"
+    },
+    {
+      "grupo": "Site",
+      "titulo": "⭐ Promoção: site + avaliações por R$ 79/mês",
+      "texto": "Tenho também uma promoção que junta os dois serviços:\n✅ Site da {loja} sem pagar a criação (economia de R$ 300)\n✅ Hospedagem e manutenção do site\n✅ Avaliações no Google (QR code, display e resumo semanal)\nTudo por R$ 79/mês, com mínimo de 6 meses.\n\nSeparado ficaria R$ 300 do site + R$ 50/mês de manutenção + R$ 39/mês das avaliações. Quer aproveitar?"
+    },
+    {
+      "grupo": "Site",
+      "titulo": "📱 \"Já tenho Instagram\"",
+      "texto": "O Instagram é ótimo, e o site não substitui, ele complementa: quem procura no Google (\"perto de mim\") cai no site, que mostra tudo em um lugar e leva direto para o WhatsApp. Além disso, o site fica no nome da {loja} e não depende do algoritmo do Instagram."
+    },
+    {
+      "grupo": "Site",
+      "titulo": "💸 \"Está caro\" / \"Não tenho esse valor agora\"",
+      "texto": "Entendo! Dá para parcelar em 3× de R$ 100. E tem a promoção: você não paga a criação do site, só R$ 79 por mês já com as avaliações do Google incluídas. Se 1 ou 2 clientes novos por mês vierem pela internet, já se pagou."
+    },
+    {
+      "grupo": "Site",
+      "titulo": "🔧 \"Quem cuida se precisar mudar algo?\"",
+      "texto": "Com a hospedagem e manutenção (R$ 50/mês) eu cuido de tudo: é só me mandar no WhatsApp o que mudar (preços, horários, fotos). Sem a manutenção, eu te entrego o site pronto e as alterações são cobradas à parte."
+    },
+    {
+      "grupo": "Site",
+      "titulo": "🔑 \"O site fica meu?\"",
+      "texto": "Sim! O domínio (o endereço do site) é registrado no nome da {loja}. Se um dia você quiser sair, te entrego tudo."
+    },
+    {
+      "grupo": "Site",
+      "titulo": "✅ Fechar o site",
+      "texto": "Fechado! 🎉 Para eu montar o site da {loja}, me manda por aqui:\n📸 umas 5 a 10 fotos (fachada, ambiente, trabalhos)\n📝 lista de serviços (e preços, se quiser mostrar)\n🕒 horários de funcionamento\n📍 endereço\n📱 WhatsApp e Instagram\nAssim que receber, em até 7 dias te mando a prévia para aprovar."
+    },
+    {
+      "grupo": "Geral",
+      "titulo": "🔁 Follow-up (sem resposta há 3 dias)",
+      "texto": "Oi! Passando só pra saber se você viu minha mensagem sobre a {loja} 🙂 Se não fizer sentido agora, sem problema, é só me avisar que eu não mando mais."
+    },
+    {
+      "grupo": "Geral",
+      "titulo": "🙏 Agradecer um \"não\"",
+      "texto": "Sem problema, obrigado pelo retorno! Não vou mais mandar mensagem. Se um dia precisar, é só me chamar aqui. Sucesso para a {loja}! 🙌"
+    }
+  ]
+}
