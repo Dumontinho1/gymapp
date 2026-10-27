@@ -8,3 +8,7 @@ supabase/functions/.env
 .vercel
 !supabase/functions/.env.test
 !supabase/functions/.env.example
+
+# NotaMais: dados gerados (leads e clientes têm dados de terceiros)
+leads/
+clientes/

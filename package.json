@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@supabase/supabase-js": "2.118.0",
+    "qrcode": "^1.5.4",
     "stripe": "23.0.1",
     "supabase": "2.122.0"
   }
