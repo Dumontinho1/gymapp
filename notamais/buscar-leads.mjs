@@ -80,15 +80,103 @@ async function buscar(apiKey, cidade, categorias, paginas) {
   return { lugares: [...porId.values()], chamadas };
 }
 
+// ---------------------------------------------------------------- OpenStreetMap (sem chave)
+const OSM_CATS = [
+  ['shop', 'hairdresser', 'salão/barbearia'], ['shop', 'beauty', 'clínica de estética'], ['shop', 'pet', 'pet shop'],
+  ['shop', 'car_repair', 'oficina mecânica'], ['amenity', 'dentist', 'clínica odontológica'], ['healthcare', 'dentist', 'clínica odontológica'],
+  ['healthcare', 'physiotherapist', 'clínica de fisioterapia'], ['leisure', 'fitness_centre', 'academia'], ['amenity', 'restaurant', 'restaurante'],
+  ['amenity', 'fast_food', 'lanchonete'], ['amenity', 'veterinary', 'veterinário'], ['amenity', 'driving_school', 'autoescola'],
+  ['amenity', 'car_wash', 'lava rápido'], ['amenity', 'language_school', 'escola de idiomas'],
+];
+
+/* Escolhe o melhor telefone de uma lista "a; b; c" (celular primeiro). */
+export function melhorTelefone(...campos) {
+  const nums = campos.filter(Boolean).flatMap((c) => String(c).split(/[;,/]| ou /)).map((x) => x.trim()).filter(Boolean);
+  const parsed = nums.map((x) => ({ x, t: telefoneBR(x) })).filter((p) => p.t);
+  return (parsed.find((p) => p.t.celular) || parsed[0] || {}).x || '';
+}
+
+export function osmParaLugares(elements) {
+  const out = [];
+  for (const e of elements || []) {
+    const t = e.tags || {};
+    if (!t.name) continue;
+    const cat = OSM_CATS.find(([k, v]) => t[k] === v);
+    const tel = melhorTelefone(t['contact:whatsapp'], t['contact:mobile'], t.mobile, t.phone, t['contact:phone']);
+    if (!tel) continue;
+    const end = [[t['addr:street'], t['addr:housenumber']].filter(Boolean).join(', '), t['addr:suburb'], t['addr:city']].filter(Boolean).join(' - ');
+    out.push({ id: `osm-${e.type}-${e.id}`, displayName: { text: t.name }, categoria: cat ? cat[2] : 'negócio local',
+      nationalPhoneNumber: tel, formattedAddress: end, websiteUri: t.website || t['contact:website'] || '' });
+  }
+  return out;
+}
+
+async function buscarOSM(cidade) {
+  const nomeCidade = String(cidade).split(',')[0].trim().replace(/"/g, '');
+  const sel = OSM_CATS.map(([k, v]) => `nwr["${k}"="${v}"](area.a);`).join('\n  ');
+  const q = `[out:json][timeout:120];\narea["name"="${nomeCidade}"]["boundary"="administrative"]["admin_level"="8"]->.a;\n(\n  ${sel}\n);\nout tags center;`;
+  const res = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: new URLSearchParams({ data: q }) });
+  if (!res.ok) throw new Error(`OpenStreetMap respondeu ${res.status}`);
+  const j = await res.json();
+  return osmParaLugares(j.elements);
+}
+
+// ---------------------------------------------------------------- planilha (Outscraper / Apify / manual)
+export function lerCSV(texto) {
+  texto = texto.replace(/^\ufeff/, '');
+  const prim = texto.split(/\r?\n/)[0] || '';
+  const sep = (prim.match(/;/g) || []).length > (prim.match(/,/g) || []).length ? ';' : ',';
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < texto.length; i++) {
+    const ch = texto[i];
+    if (q) {
+      if (ch === '"' && texto[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') q = false;
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === sep) { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && texto[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  const head = (rows.shift() || []).map((h) => h.trim().toLowerCase());
+  return rows.filter((r) => r.some((c) => c.trim())).map((r) => Object.fromEntries(head.map((h, i) => [h, (r[i] ?? '').trim()])));
+}
+
+const col = (o, ...nomes) => { for (const n of nomes) if (o[n] != null && o[n] !== '') return o[n]; return ''; };
+const numBR = (v) => { const n = parseFloat(String(v).replace(/[^\d,.-]/g, '').replace(',', '.')); return isFinite(n) ? n : undefined; };
+
+export function csvParaLugares(linhas) {
+  return linhas.map((o, i) => {
+    const rating = numBR(col(o, 'rating', 'totalscore', 'nota'));
+    const count = numBR(col(o, 'reviews', 'reviewscount', 'userratingcount', 'avaliações', 'avaliacoes'));
+    const status = col(o, 'business_status', 'businessstatus').toUpperCase();
+    return {
+      id: col(o, 'place_id', 'placeid', 'google_id') || 'csv-' + i,
+      displayName: { text: col(o, 'name', 'title', 'nome') },
+      categoria: (col(o, 'category', 'categoryname', 'type', 'subtypes', 'categoria').split(',')[0] || 'negócio local').toLowerCase(),
+      nationalPhoneNumber: melhorTelefone(col(o, 'phone', 'phoneunformatted', 'phone_1', 'telefone')),
+      formattedAddress: col(o, 'full_address', 'address', 'endereço', 'endereco'),
+      rating, userRatingCount: count === undefined && rating !== undefined ? 0 : count,
+      googleMapsUri: /^https:\/\/(www\.)?(maps\.)?google\./.test(col(o, 'location_link', 'url')) ? col(o, 'location_link', 'url') : '',
+      businessStatus: status === 'OPERATIONAL' || !status ? 'OPERATIONAL' : status,
+    };
+  }).filter((p) => p.displayName.text && p.nationalPhoneNumber);
+}
+
 // ---------------------------------------------------------------- pontuação
 /* Celular brasileiro (DDD + 9 dígitos começando com 9): quase sempre tem
    WhatsApp. Fixo pode ter WhatsApp Business, mas é menos provável. */
 export function telefoneBR(nacional, internacional) {
   const digits = String(internacional || nacional || '').replace(/\D/g, '');
+  if (/^0[3589]00/.test(digits)) return null; // 0800/0300/0500/0900: não tem WhatsApp
   let n = digits.startsWith('55') ? digits.slice(2) : digits;
   n = n.replace(/^0/, '');
   if (n.length < 10 || n.length > 11) return null;
   const ddd = n.slice(0, 2), resto = n.slice(2);
+  if (!/^[1-9][1-9]$/.test(ddd)) return null; // DDD brasileiro nunca tem zero
   const celular = resto.length === 9 && resto.startsWith('9');
   return { e164: '55' + n, ddd, celular };
 }
@@ -100,6 +188,13 @@ export function pontuar(l, refPorCategoria) {
   const r = l.rating || 0;
   if (l.telefone?.celular) { s += 30; motivos.push('celular (provável WhatsApp)'); }
   else if (l.telefone) { s += 5; motivos.push('telefone fixo'); }
+
+  // Fonte sem nota/avaliações (OpenStreetMap): prioriza pelo celular e pede
+  // para conferir o perfil no Maps antes de enviar.
+  if (l.semAvaliacoes) {
+    motivos.push('confira as avaliações no Maps antes de enviar');
+    return { score: l.telefone?.celular ? 70 : 35, motivos };
+  }
 
   if (n === 0) { s += 5; motivos.push('nenhuma avaliação'); }
   else if (n <= 20) { s += 30; motivos.push('poucas avaliações'); }
@@ -120,9 +215,21 @@ export function pontuar(l, refPorCategoria) {
 // ---------------------------------------------------------------- mensagens
 const fmtNota = (r) => (r ? r.toFixed(1).replace('.', ',') : '–');
 
-export function mensagens(l, ref, nome) {
+export function mensagens(l, ref, nome, cidade) {
   const quem = nome ? `Aqui é ${nome}` : 'Tudo bem';
   const n = l.userRatingCount || 0;
+  const followup =
+`Oi! Passando só pra saber se você viu minha mensagem sobre as avaliações da ${l.nome} no Google 🙂 Se não fizer sentido agora, sem problema, é só me avisar que eu não mando mais.`;
+  if (l.semAvaliacoes) {
+    const onde = cidade ? ` aqui em ${String(cidade).split(',')[0].trim()}` : '';
+    const primeira =
+`Olá! ${quem}. Vi a ${l.nome}${onde} e queria te fazer uma pergunta rápida: vocês costumam pedir para os clientes avaliarem no Google?
+
+Pergunto porque estou ajudando negócios da região a receber mais avaliações 5★ de forma automática e dentro das regras do Google. Quem tem mais avaliações aparece primeiro quando alguém procura "perto de mim".
+
+Estou com vagas para um teste grátis de 30 dias, sem compromisso. Posso te mandar uma imagem de como funciona?`;
+    return { primeira, followup };
+  }
   let gancho;
   if (n === 0) {
     gancho = `vi que a ${l.nome} ainda não tem avaliações no Google`;
@@ -138,9 +245,6 @@ Estou ajudando negócios aqui da região a receber mais avaliações 5★ no Goo
 
 Estou com vagas para um teste grátis de 30 dias, sem compromisso. Posso te mandar uma imagem de como funciona?`;
 
-  const followup =
-`Oi! Passando só pra saber se você viu minha mensagem sobre as avaliações da ${l.nome} no Google 🙂 Se não fizer sentido agora, sem problema, é só me avisar que eu não mando mais.`;
-
   return { primeira, followup };
 }
 
@@ -155,7 +259,9 @@ function csvCell(v) {
   return '"' + s.replace(/"/g, '""') + '"';
 }
 
-export function processar(lugares, nome) {
+const mapsBusca = (nome, endereco) => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(nome + ' ' + (endereco || ''));
+
+export function processar(lugares, nome, cidade) {
   const ativos = lugares
     .filter((p) => !p.businessStatus || p.businessStatus === 'OPERATIONAL')
     .map((p) => ({
@@ -166,9 +272,10 @@ export function processar(lugares, nome) {
       endereco: p.formattedAddress || '',
       rating: p.rating || 0,
       userRatingCount: p.userRatingCount || 0,
+      semAvaliacoes: p.rating == null && p.userRatingCount == null,
       telefoneTexto: p.nationalPhoneNumber || '',
       telefone: telefoneBR(p.nationalPhoneNumber, p.internationalPhoneNumber),
-      maps: p.googleMapsUri || '',
+      maps: p.googleMapsUri || mapsBusca(p.displayName?.text || '', p.formattedAddress),
       site: p.websiteUri || '',
     }));
 
@@ -182,7 +289,7 @@ export function processar(lugares, nome) {
     .filter((l) => l.telefone) // sem telefone não há como contatar
     .map((l) => {
       const { score, motivos } = pontuar(l, ref);
-      const msg = mensagens(l, ref[l.categoria], nome);
+      const msg = mensagens(l, ref[l.categoria], nome, cidade);
       return {
         ...l, score, motivos,
         whatsapp: waLink(l.telefone.e164, msg.primeira),
@@ -236,6 +343,14 @@ async function main() {
 
   if (a.demo) {
     lugares = demo(); cidade = 'Demonstração';
+  } else if (typeof a.csv === 'string') {
+    lugares = csvParaLugares(lerCSV(readFileSync(a.csv, 'utf8')));
+    cidade = typeof cidade === 'string' ? cidade : 'Planilha importada';
+    console.log(`Planilha: ${lugares.length} negócios com nome e telefone.`);
+  } else if (a.fonte === 'osm') {
+    if (typeof cidade !== 'string') { console.error('Informe a cidade: --cidade "Belo Horizonte, MG"'); process.exit(1); }
+    console.log(`Buscando no OpenStreetMap: ${cidade}…`);
+    lugares = await buscarOSM(cidade);
   } else {
     const key = process.env.GOOGLE_MAPS_API_KEY;
     if (!key) { console.error('Defina GOOGLE_MAPS_API_KEY (veja o PLANO.md, seção "Robô de prospecção").'); process.exit(1); }
@@ -246,11 +361,12 @@ async function main() {
     ({ lugares, chamadas } = await buscar(key, cidade, categorias, paginas));
   }
 
-  const leads = processar(lugares, nome);
+  const leads = processar(lugares, nome, cidade);
   salvar(leads, saida, { cidade, geradoEm: new Date().toISOString(), nome });
   const quentes = leads.filter((l) => l.score >= 70).length;
   console.log(`✔ ${lugares.length} negócios analisados, ${leads.length} com telefone, ${quentes} com pontuação alta (≥70).`);
   if (chamadas) console.log(`  Buscas usadas: ${chamadas} (cota grátis do Google: ~1.000/mês).`);
+  if (leads.some((l) => l.semAvaliacoes)) console.log('  Fonte sem nota/avaliações: confira o perfil no Google Maps (link no painel) antes de enviar.');
   console.log(`  Abra o painel: ${join(saida, 'leads.html')}`);
   console.log(`  Planilha:      ${join(saida, 'leads.csv')}`);
 }

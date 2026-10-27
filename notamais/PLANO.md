@@ -68,6 +68,31 @@ O Google **permite e incentiva** pedir avaliações. O que é **proibido** (e po
 5. 🔒 **Trava contra cobrança:** em **APIs e serviços → Places API (New) → Cotas**, limite as *requests per day* a **30**. Com isso você nunca passa da cota grátis (30 × 30 dias ≈ 900 por mês). Em **Faturamento → Orçamentos e alertas**, crie também um alerta de R$ 1.
 6. Guarde a chave como uma senha. Ela **não** pode ir para o GitHub nem para mensagens.
 
+### 5.1b Sem cartão no Google? Duas alternativas
+**A) OpenStreetMap (grátis, sem cadastro e sem chave)**
+```bash
+node notamais/buscar-leads.mjs --fonte osm --cidade "Belo Horizonte, MG" --nome "Seu Nome"
+```
+- Traz nome, telefone, categoria e endereço, mas **não traz nota nem número de avaliações**. A mensagem muda para uma pergunta ("vocês costumam pedir avaliação no Google?").
+- No painel, toque em **🔎 Conferir avaliações no Google Maps** antes de enviar. Se a loja já tiver centenas de avaliações com nota alta, pule.
+- A cobertura é menor que a do Google (o mapa é feito por voluntários), mas cidades grandes costumam ter centenas de negócios com telefone.
+
+**B) Planilha de um serviço com plano grátis (traz nota e avaliações)**
+Serviços como **Outscraper** ou **Apify (Google Maps Scraper)** têm uma cota mensal gratuita para exportar resultados do Google Maps. Confira os limites e os termos de uso no site de cada um.
+1. Busque, por exemplo, "barbearia em Belo Horizonte" e exporte em **CSV**.
+2. Rode:
+```bash
+node notamais/buscar-leads.mjs --csv caminho/do/arquivo.csv --cidade "Belo Horizonte, MG" --nome "Seu Nome"
+```
+O robô reconhece sozinho as colunas desses serviços (nome, telefone, nota, avaliações, categoria, endereço), descarta negócios fechados e números 0800, e pontua normalmente.
+
+**Erro no faturamento do Google?** As causas mais comuns no Brasil:
+- cartão sem **compras internacionais** liberadas;
+- cartão de **débito** (use crédito; um cartão virtual de banco digital costuma funcionar);
+- dados (nome e CPF) diferentes dos do titular do cartão.
+
+Tente de novo depois de liberar compras internacionais no app do banco.
+
 ### 5.2 Rodar o robô
 No seu computador (precisa do Node.js, https://nodejs.org, versão LTS):
 ```bash

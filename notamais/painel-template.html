@@ -134,9 +134,12 @@
       var left = el('div');
       left.appendChild(el('div', 'name', l.nome));
       var meta = el('div', 'meta');
-      var stars = el('span', 'stars', '★ ' + fmt(l.rating));
-      meta.appendChild(stars);
-      meta.appendChild(document.createTextNode(' · ' + l.userRatingCount + ' avaliações · ' + l.categoria + ' · ' + l.telefoneTexto));
+      if(l.semAvaliacoes){
+        meta.appendChild(document.createTextNode(l.categoria + ' · ' + l.telefoneTexto));
+      } else {
+        meta.appendChild(el('span', 'stars', '★ ' + fmt(l.rating)));
+        meta.appendChild(document.createTextNode(' · ' + l.userRatingCount + ' avaliações · ' + l.categoria + ' · ' + l.telefoneTexto));
+      }
       left.appendChild(meta);
       left.appendChild(el('div', 'meta', l.endereco));
       top.appendChild(left);
@@ -170,7 +173,7 @@
       sel.addEventListener('change', function(){ s.status = sel.value; if(sel.value === 'enviado' && !s.enviadoEm) s.enviadoEm = Date.now(); save(); refresh(); });
       row.appendChild(sel);
       if(l.maps && /^https:\/\/(www\.)?(maps\.)?google\.[a-z.]+\//.test(l.maps)){
-        var mp = el('a', 'lnk', 'Ver no Google Maps ↗'); mp.href = l.maps; mp.target = '_blank'; mp.rel = 'noopener noreferrer'; row.appendChild(mp);
+        var mp = el('a', 'lnk', l.semAvaliacoes ? '🔎 Conferir avaliações no Google Maps ↗' : 'Ver no Google Maps ↗'); mp.href = l.maps; mp.target = '_blank'; mp.rel = 'noopener noreferrer'; row.appendChild(mp);
       }
       card.appendChild(row);
 
