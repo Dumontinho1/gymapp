@@ -22,9 +22,11 @@ test('OpenStreetMap: só com nome e telefone, categoria traduzida, prefere celul
   const [lead] = processar(l, 'Ana', 'Belo Horizonte, MG');
   assert.equal(lead.semAvaliacoes, true);
   assert.equal(lead.score, 70);
-  assert.match(lead.mensagem, /Vi a Barbearia Savassi aqui em Belo Horizonte/);
+  assert.match(lead.mensagem, /^Olá! Aqui é Ana\. Vi a Barbearia Savassi aqui em Belo Horizonte/);
+  assert.match(processar(l, '', 'Belo Horizonte')[0].mensagem, /^Olá, tudo bem\? Vi a Barbearia Savassi/);
   assert.match(lead.maps, /^https:\/\/www\.google\.com\/maps\/search\//);
   assert.match(lead.whatsapp, /^https:\/\/wa\.me\/5531999991111\?text=/);
+  assert.equal(lead.telefoneTexto, '(31) 99999-1111');
 });
 
 test('planilha Outscraper (vírgula) e Apify (ponto e vírgula) com aspas e quebras de linha', () => {
@@ -38,7 +40,7 @@ test('planilha Outscraper (vírgula) e Apify (ponto e vírgula) com aspas e queb
   assert.equal(a[0].userRatingCount, 22);
   const leads = processar(a, 'Ana', 'Belo Horizonte, MG');
   assert.equal(leads.length, 1, 'negócio fechado sai');
-  assert.match(leads[0].mensagem, /nota 4,3 com 22 avaliações/);
+  assert.match(leads[0].mensagem, /^Olá! Aqui é Ana\. Vi a Studio "Bela" BH no Google Maps: nota 4,3 com 22 avaliações/);
 
   const apify = '﻿title;address;phone;totalScore;reviewsCount;categoryName;url\n'
     + 'Oficina Pampulha;"Rua A,\n10";(31) 3456-7890;3,9;41;Oficina mecânica;javascript:alert(1)\n';

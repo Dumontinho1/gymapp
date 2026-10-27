@@ -226,14 +226,14 @@ export function pontuar(l, refPorCategoria) {
 const fmtNota = (r) => (r ? r.toFixed(1).replace('.', ',') : '–');
 
 export function mensagens(l, ref, nome, cidade) {
-  const quem = nome ? `Aqui é ${nome}` : 'Tudo bem';
+  const abertura = nome ? `Olá! Aqui é ${nome}.` : 'Olá, tudo bem?';
   const n = l.userRatingCount || 0;
   const followup =
 `Oi! Passando só pra saber se você viu minha mensagem sobre as avaliações da ${l.nome} no Google 🙂 Se não fizer sentido agora, sem problema, é só me avisar que eu não mando mais.`;
   if (l.semAvaliacoes) {
     const onde = cidade ? ` aqui em ${String(cidade).split(',')[0].trim()}` : '';
     const primeira =
-`Olá! ${quem}. Vi a ${l.nome}${onde} e queria te fazer uma pergunta rápida: vocês costumam pedir para os clientes avaliarem no Google?
+`${abertura} Vi a ${l.nome}${onde} e queria te fazer uma pergunta rápida: vocês costumam pedir para os clientes avaliarem no Google?
 
 Pergunto porque estou ajudando negócios da região a receber mais avaliações 5★ de forma automática e dentro das regras do Google. Quem tem mais avaliações aparece primeiro quando alguém procura "perto de mim".
 
@@ -249,7 +249,7 @@ Estou com vagas para um teste grátis de 30 dias, sem compromisso. Posso te mand
     gancho = `vi a ${l.nome} no Google Maps: nota ${fmtNota(l.rating)} com ${n} avaliações`;
   }
   const primeira =
-`Olá! ${quem}, ${gancho}.
+`${abertura} ${gancho.charAt(0).toUpperCase() + gancho.slice(1)}.
 
 Estou ajudando negócios aqui da região a receber mais avaliações 5★ no Google, de forma automática e dentro das regras do Google. O cliente recebe um lembrete simples depois do atendimento e avalia em 30 segundos.
 
@@ -283,7 +283,6 @@ export function processar(lugares, nome, cidade) {
       rating: p.rating || 0,
       userRatingCount: p.userRatingCount || 0,
       semAvaliacoes: p.rating == null && p.userRatingCount == null,
-      telefoneTexto: p.nationalPhoneNumber || '',
       telefone: telefoneBR(p.nationalPhoneNumber, p.internationalPhoneNumber),
       maps: p.googleMapsUri || mapsBusca(p.displayName?.text || '', p.formattedAddress),
       site: p.websiteUri || '',
@@ -298,6 +297,8 @@ export function processar(lugares, nome, cidade) {
   return ativos
     .filter((l) => l.telefone) // sem telefone não há como contatar
     .map((l) => {
+      const r = l.telefone.e164.slice(4);
+      l.telefoneTexto = `(${l.telefone.ddd}) ${r.slice(0, r.length - 4)}-${r.slice(-4)}`;
       const { score, motivos } = pontuar(l, ref);
       const msg = mensagens(l, ref[l.categoria], nome, cidade);
       return {
