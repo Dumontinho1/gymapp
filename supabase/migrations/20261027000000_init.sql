@@ -253,3 +253,14 @@ end;
 $$;
 revoke execute on function public.mark_trial_used(uuid) from public, anon, authenticated;
 grant execute on function public.mark_trial_used(uuid) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- PERMISSÕES EXPLÍCITAS: o projeto pode ser criado com "Automatically expose
+-- new tables" desligado (recomendado). Então nada depende de grants padrão:
+-- o app só LÊ as próprias linhas (RLS) e só o backend (service_role) escreve.
+-- ---------------------------------------------------------------------------
+grant usage on schema public to anon, authenticated, service_role;
+grant select on public.profiles, public.user_data to authenticated;
+grant select, insert, update, delete on public.profiles, public.user_data, public.trial_ledger, public.stripe_events to service_role;
+grant execute on function public.push_user_data(jsonb, bigint) to authenticated;
+grant execute on function public.is_premium(uuid), public.mark_trial_used(uuid) to service_role;
