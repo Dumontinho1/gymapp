@@ -115,10 +115,20 @@ async function buscarOSM(cidade) {
   const nomeCidade = String(cidade).split(',')[0].trim().replace(/"/g, '');
   const sel = OSM_CATS.map(([k, v]) => `nwr["${k}"="${v}"](area.a);`).join('\n  ');
   const q = `[out:json][timeout:120];\narea["name"="${nomeCidade}"]["boundary"="administrative"]["admin_level"="8"]->.a;\n(\n  ${sel}\n);\nout tags center;`;
-  const res = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: new URLSearchParams({ data: q }) });
-  if (!res.ok) throw new Error(`OpenStreetMap respondeu ${res.status}`);
-  const j = await res.json();
-  return osmParaLugares(j.elements);
+  // Servidores públicos do OpenStreetMap: se um recusar ou estiver lotado, tenta o próximo.
+  const servidores = ['https://overpass-api.de', 'https://overpass.kumi.systems', 'https://overpass.private.coffee', 'https://maps.mail.ru/osm/tools/overpass'];
+  const erros = [];
+  for (const base of servidores) {
+    try {
+      const res = await fetch(base + '/api/interpreter', { method: 'POST', body: new URLSearchParams({ data: q }), signal: AbortSignal.timeout(150000) });
+      if (!res.ok) { erros.push(`${new URL(base).host}: HTTP ${res.status}`); continue; }
+      const j = await res.json();
+      return osmParaLugares(j.elements);
+    } catch (e) {
+      erros.push(`${new URL(base).host}: ${e.cause?.code || e.message}`);
+    }
+  }
+  throw new Error('Nenhum servidor do OpenStreetMap respondeu (' + erros.join('; ') + ')');
 }
 
 // ---------------------------------------------------------------- planilha (Outscraper / Apify / manual)
