@@ -8,8 +8,11 @@ if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(url) && !/^http:\/\/(127\.0\.0\
   console.error('SUPABASE_URL inválida (esperado https://<ref>.supabase.co)');
   process.exit(1);
 }
-if (!key || /service_role/.test(Buffer.from(key.split('.')[1] || '', 'base64').toString())) {
-  console.error('SUPABASE_ANON_KEY ausente ou é uma service_role key (NUNCA use a service_role no app!)');
+const isLegacySecret = /service_role/.test(Buffer.from(key.split('.')[1] || '', 'base64').toString());
+const isNewSecret = /^sb_secret_/.test(key);
+const looksPublic = /^sb_publishable_/.test(key) || /"role":"anon"/.test(Buffer.from(key.split('.')[1] || '', 'base64').toString());
+if (!key || isLegacySecret || isNewSecret || !looksPublic) {
+  console.error('Use a chave PÚBLICA (sb_publishable_... ou a "anon" legada). NUNCA a secret/service_role no app!');
   process.exit(1);
 }
 

@@ -39,7 +39,7 @@ npx supabase functions deploy
 
 ## 4. App na Vercel
 ```bash
-SUPABASE_URL=https://SEU_REF.supabase.co SUPABASE_ANON_KEY=eyJ... node scripts/configure.mjs
+SUPABASE_URL=https://SEU_REF.supabase.co SUPABASE_ANON_KEY=sb_publishable_... node scripts/configure.mjs
 ```
 Esse comando preenche o `config.js` e a CSP do `vercel.json`. Depois, faça o commit e importe o repositório na Vercel (framework: **Other**, sem build). Por último, ajuste `APP_URL` e `ALLOWED_ORIGINS` nos secrets para o domínio final.
 
