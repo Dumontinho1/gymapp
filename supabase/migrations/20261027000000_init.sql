@@ -31,7 +31,7 @@ create policy "profiles: ler o próprio"
 
 -- Sem policies de insert/update/delete: o cliente não altera plano. Defesa em
 -- profundidade: também tira os privilégios de escrita no nível de GRANT.
-revoke insert, update, delete, truncate on public.profiles from anon, authenticated;
+revoke insert, update, delete, truncate, references, trigger on public.profiles from anon, authenticated;
 revoke all on public.profiles from anon;
 
 -- ---------------------------------------------------------------------------
@@ -121,8 +121,10 @@ as $$
   );
 $$;
 
-revoke execute on function public.is_premium(uuid) from public, anon;
-grant execute on function public.is_premium(uuid) to authenticated, service_role;
+-- Só o backend consulta o plano de um id arbitrário; o app lê o próprio
+-- profile via RLS. (push_user_data, sendo security definer, ainda pode chamar.)
+revoke execute on function public.is_premium(uuid) from public, anon, authenticated;
+grant execute on function public.is_premium(uuid) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- USER DATA: snapshot do app (treinos, sessões, recordes...) para o sync.
@@ -146,7 +148,7 @@ create policy "user_data: ler o próprio"
   to authenticated
   using ((select auth.uid()) = user_id);
 
-revoke insert, update, delete, truncate on public.user_data from anon, authenticated;
+revoke insert, update, delete, truncate, references, trigger on public.user_data from anon, authenticated;
 revoke all on public.user_data from anon;
 
 -- Única porta de escrita. Confere login + Premium no servidor e rejeita se

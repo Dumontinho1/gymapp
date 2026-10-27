@@ -132,7 +132,7 @@ test('rejeita payload inválido e grande demais', async () => {
 });
 
 test('funções internas não são chamáveis pelo usuário', async () => {
-  for (const [fn, args] of [['mark_trial_used', { p_user: A.id }], ['email_hash', { p_email: 'x@y.z' }], ['handle_new_user', {}]]) {
+  for (const [fn, args] of [['mark_trial_used', { p_user: A.id }], ['email_hash', { p_email: 'x@y.z' }], ['handle_new_user', {}], ['is_premium', { p_user: B.id }]]) {
     const r = await A.c.rpc(fn, args);
     assert.ok(r.error, `${fn} deveria ser bloqueada`);
   }
